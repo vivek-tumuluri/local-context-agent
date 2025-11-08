@@ -1,0 +1,47 @@
+# Virtual environments & env files
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+pip-log.txt
+
+# Testing & lint tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.dmypy.json
+.pyre/
+
+# Editor/OS metadata
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Local data stores
+local_context.db
+local_context.db-*
+*.db
+*.sqlite
+.chroma/
+chroma/
