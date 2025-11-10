@@ -17,9 +17,7 @@ from sqlalchemy.orm import Session
 
 
 from app.ingest import job_helper
-
-
-from app.rag.routes import fake_user
+from app.auth import get_current_user
 
 
 class DriveIngestCallable(Protocol):
@@ -112,7 +110,7 @@ def _bg_db_session() -> Session:
 def start_drive_ingest(
     body: DriveStartBody,
     bg: BackgroundTasks,
-    user=Depends(fake_user),
+    user=Depends(get_current_user),
     db: Session = Depends(_db_dependency),
 ):
     """
@@ -147,7 +145,7 @@ def start_drive_ingest(
 
 
 @router.get("/jobs/{job_id}")
-def get_job(job_id: str, user=Depends(fake_user), db: Session = Depends(_db_dependency)):
+def get_job(job_id: str, user=Depends(get_current_user), db: Session = Depends(_db_dependency)):
     """
     Returns the current status and metadata for a single ingestion job.
     Enforces that the job belongs to the current user.
@@ -162,7 +160,7 @@ def get_job(job_id: str, user=Depends(fake_user), db: Session = Depends(_db_depe
 
 
 @router.get("/jobs")
-def list_jobs(user=Depends(fake_user), db: Session = Depends(_db_dependency)):
+def list_jobs(user=Depends(get_current_user), db: Session = Depends(_db_dependency)):
     """
     Lists recent ingestion jobs for the current user, newest first.
     """

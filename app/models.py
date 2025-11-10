@@ -2,12 +2,38 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column, String, Integer, DateTime, Boolean, JSON, UniqueConstraint, Index
+    Column, String, Integer, DateTime, Boolean, JSON, UniqueConstraint, Index, ForeignKey
 )
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 utcnow = lambda: datetime.now(timezone.utc)
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    google_sub = Column(String, unique=True, nullable=False, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    full_name = Column(String, nullable=True)
+    picture = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+    @property
+    def user_id(self) -> str:
+        return self.id
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(String, ForeignKey("users.id"), index=True, nullable=False)
+    token_hash = Column(String, unique=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    last_used_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
 
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
@@ -66,6 +92,7 @@ class ContentIndex(Base):
 class DriveSession(Base):
     __tablename__ = "drive_sessions"
     user_id = Column(String, primary_key=True)
-    session_token = Column(String, nullable=False)
+    session_token = Column(String, nullable=True)
+    credentials = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)

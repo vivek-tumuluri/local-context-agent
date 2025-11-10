@@ -1,15 +1,22 @@
 import datetime as dt
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from googleapiclient.discovery import build
-from ..auth import creds_from_session
+from sqlalchemy.orm import Session
+
+from app.db import get_db
+from ..auth import get_current_user, get_google_credentials_for_user
 from ..rag.chunk import chunk_text
 from ..rag.vector import upsert as upsert_chunks
 
 router = APIRouter(prefix="/ingest/calendar", tags=["ingest"])
 
 @router.post("")
-def ingest_calendar(session: str, months: int = 6):
-    creds = creds_from_session(session)
+def ingest_calendar(
+    months: int = 6,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    creds = get_google_credentials_for_user(db, user.user_id)
     svc = build("calendar", "v3", credentials=creds)
 
     now = dt.datetime.utcnow().isoformat() + "Z"
@@ -39,8 +46,8 @@ def ingest_calendar(session: str, months: int = 6):
         )
 
 
-        meta = {"source": "calendar", "title": title, "id": e["id"]}
+        meta = {"source": "calendar", "title": title, "id": e["id"], "user_id": user.user_id}
         chunks = chunk_text(text, meta=meta)
-        upsert_chunks(chunks)
+        upsert_chunks(chunks, user_id=user.user_id)
 
     return {"ingested": len(events)}

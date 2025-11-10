@@ -4,17 +4,13 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import IngestionJob
+from app.auth import get_current_user
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-def fake_user():
-    class U:
-        user_id = "demo_user"
-    return U()
-
 @router.post("/ingest")
-def start_ingest(user=Depends(fake_user), db: Session = Depends(get_db)):
+def start_ingest(user=Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Create a new ingestion job row (queued) and return its ID.
     """
@@ -30,7 +26,7 @@ def start_ingest(user=Depends(fake_user), db: Session = Depends(get_db)):
     return {"job_id": job_id, "status": "queued"}
 
 @router.get("/{job_id}")
-def get_job(job_id: str, user=Depends(fake_user), db: Session = Depends(get_db)):
+def get_job(job_id: str, user=Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Return the current status and metrics for a given job.
     """

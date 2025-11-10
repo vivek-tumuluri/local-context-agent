@@ -107,6 +107,50 @@ def _embed_text(user_id: str, doc_id: str, text: str, content_hash: str) -> Dict
     return vector.upsert(to_upsert, user_id=user_id)
 
 
+def process_drive_file(
+    db: Session,
+    *,
+    user_id: str,
+    file_meta: Dict[str, Any],
+    fetch_file_bytes: Callable[[str, str, Optional[str]], bytes],
+    parse_bytes: Callable[[bytes, Optional[str]], str],
+    force_reembed: bool = False,
+) -> Dict[str, int]:
+    """
+    Normalize, dedupe, embed, and persist metadata for a single Drive file.
+    Returns {"processed": 1, "embedded": N} when work was attempted.
+    """
+    fid = file_meta["id"]
+    stored = _get_row(db, user_id, "drive", fid)
+    result = {"processed": 0, "embedded": 0}
+
+    if not force_reembed and not should_reingest(stored, file_meta):
+        result["processed"] = 1
+        return result
+
+    raw = fetch_file_bytes(user_id=user_id, file_id=fid, mime_type=file_meta.get("mimeType"))
+    if not raw:
+        result["processed"] = 1
+        return result
+
+    parsed = parse_bytes(raw, file_meta.get("mimeType"))
+    normalized = normalize_text(parsed)
+    chash = compute_content_hash(normalized)
+
+    if not force_reembed and stored and (stored.content_hash or "") == chash:
+        _upsert_row(db, user_id, file_meta, stored.content_hash)
+        result["processed"] = 1
+        return result
+
+    vector.delete_by_doc_id(fid, user_id=user_id)
+    summary = _embed_text(user_id, fid, normalized, chash)
+    _upsert_row(db, user_id, file_meta, chash)
+
+    result["processed"] = 1
+    result["embedded"] = summary.get("added", 0)
+    return result
+
+
 def run_drive_ingest_once(
     db: Session,
     user_id: str,
@@ -116,6 +160,7 @@ def run_drive_ingest_once(
     job: Optional[IngestionJob] = None,
     page_token: Optional[str] = None,
     page_size: int = 50,
+    force_reembed: bool = False,
 ) -> Dict[str, Any]:
     processed = embedded = errors = 0
     next_token = None
@@ -135,39 +180,25 @@ def run_drive_ingest_once(
         return {"processed": 0, "embedded": 0, "errors": 1, "nextPageToken": None}
 
     for f in files:
-        fid = f["id"]
-        stored = _get_row(db, user_id, "drive", fid)
+        processed_delta = 0
         try:
-            if not should_reingest(stored, f):
-                processed += 1
-                continue
-
-            raw = fetch_file_bytes(user_id=user_id, file_id=fid, mime_type=f.get("mimeType"))
-            if not raw:
-                processed += 1
-                continue
-
-            parsed = parse_bytes(raw, f.get("mimeType"))
-            normalized = normalize_text(parsed)
-            chash = compute_content_hash(normalized)
-
-            if stored and (stored.content_hash or "") == chash:
-                _upsert_row(db, user_id, f, stored.content_hash)
-                processed += 1
-                continue
-
-            vector.delete_by_doc_id(fid, user_id=user_id)
-            summary = _embed_text(user_id, fid, normalized, chash)
-            embedded += summary.get("added", 0)
-
-            _upsert_row(db, user_id, f, chash)
-            processed += 1
-
+            summary = process_drive_file(
+                db,
+                user_id=user_id,
+                file_meta=f,
+                fetch_file_bytes=fetch_file_bytes,
+                parse_bytes=parse_bytes,
+                force_reembed=force_reembed,
+            )
+            processed_delta = summary.get("processed", 0)
+            processed += processed_delta
+            embedded += summary.get("embedded", 0)
         except Exception:
             errors += 1
 
         if job:
-            job.processed_files = (job.processed_files or 0) + 1
+            inc = processed_delta or 1
+            job.processed_files = (job.processed_files or 0) + inc
             job.metrics = {**(job.metrics or {}), "embedded": embedded, "errors": errors}
             job.updated_at = datetime.now(timezone.utc)
             db.commit()

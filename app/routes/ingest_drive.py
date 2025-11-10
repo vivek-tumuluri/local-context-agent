@@ -4,7 +4,7 @@ import io
 from uuid import uuid4
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, Query, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from googleapiclient.discovery import build
@@ -13,31 +13,11 @@ from googleapiclient.http import MediaIoBaseDownload
 from app.db import get_db
 from app.models import IngestionJob
 from app.ingest.drive_pipeline import run_drive_ingest_once
-
-
-try:
-    from app.google_clients import creds_from_session
-except ImportError:  # pragma: no cover
-    from app.auth import creds_from_session  # type: ignore
+from app.auth import get_current_user, get_google_credentials_for_user
 
 router = APIRouter(prefix="/ingest/drive", tags=["ingest:drive"])
 
-def fake_user():
-    class U: user_id = "demo_user"
-    return U()
-
-def _require_session_token(
-    request: Request,
-    x_session: Optional[str] = Header(default=None, alias="X-Session"),
-    session_qs: Optional[str] = Query(default=None, alias="session"),
-) -> str:
-    token = x_session or session_qs or request.cookies.get("session")
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing session token (X-Session header or ?session=...)")
-    return token
-
-def _drive_service(session_token: str):
-    creds = creds_from_session(session_token)
+def _drive_service(creds):
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 _GOOGLE_MIME_PREFIX = "application/vnd.google-apps/"
@@ -48,15 +28,18 @@ _EXPORT_MIME = {
     "application/vnd.google-apps.drawing": "text/plain",
 }
 
+# NOTE: Legacy endpoint. This wrapper was kept for potential future scripting use,
+# but it currently bubbles up errors poorly and needs further refactoring before
+# relying on it in production.
 @router.post("/run")
 def run_drive(
     max_files: int = Query(50, ge=1, le=500),
     page_token: Optional[str] = Query(None),
-    user=Depends(fake_user),
-    session_token: str = Depends(_require_session_token),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    svc = _drive_service(session_token)
+    creds = get_google_credentials_for_user(db, user.user_id)
+    svc = _drive_service(creds)
 
     def list_page(user_id: str, page_token: Optional[str], page_size: int) -> Dict[str, Any]:
         req = svc.files().list(
@@ -100,17 +83,36 @@ def run_drive(
     db.add(job)
     db.commit()
 
-    out = run_drive_ingest_once(
-        db=db,
-        user_id=user.user_id,
-        list_page=list_page,
-        fetch_file_bytes=fetch_file_bytes,
-        parse_bytes=parse_bytes,
-        job=job,
-        page_token=page_token,
-        page_size=max_files,
-    )
+    total_processed = total_embedded = total_errors = 0
+    remaining = max_files
+    next_page = page_token
 
-    job.status = "succeeded" if out.get("errors", 0) == 0 else "partial"
+    while remaining > 0:
+        page_size = min(remaining, max_files)
+        out = run_drive_ingest_once(
+            db=db,
+            user_id=user.user_id,
+            list_page=list_page,
+            fetch_file_bytes=fetch_file_bytes,
+            parse_bytes=parse_bytes,
+            job=job,
+            page_token=next_page,
+            page_size=page_size,
+        )
+        total_processed += out.get("processed", 0)
+        total_embedded += out.get("embedded", 0)
+        total_errors += out.get("errors", 0)
+        next_page = out.get("nextPageToken")
+        remaining -= out.get("processed", 0)
+        if not next_page or out.get("processed", 0) == 0:
+            break
+
+    job.status = "succeeded" if total_errors == 0 else "partial"
     db.commit()
-    return {"job_id": job.id, **out}
+    return {
+        "job_id": job.id,
+        "processed": total_processed,
+        "embedded": total_embedded,
+        "errors": total_errors,
+        "nextPageToken": next_page,
+    }

@@ -1,6 +1,14 @@
 from app.db import engine
 
-from app.models import Base, IngestionJob, SourceState, ContentIndex, DriveSession
+from app.models import (
+    Base,
+    IngestionJob,
+    SourceState,
+    ContentIndex,
+    DriveSession,
+    User,
+    UserSession,
+)
 
 if __name__ == "__main__":
 

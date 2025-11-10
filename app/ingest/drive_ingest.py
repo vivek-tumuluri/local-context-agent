@@ -1,22 +1,22 @@
 import io
 import os
 import random
-import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 from sqlalchemy.orm import Session
 
-from app.db import SessionLocal, get_db
-from app.models import DriveSession
-from ..auth import creds_from_session
-from ..rag.chunk import chunk_text
-from ..rag.vector import upsert as upsert_chunks
+from app.db import get_db, SessionLocal
+from ..auth import (
+    get_current_user,
+    get_google_credentials_for_user,
+    get_google_credentials_for_user_unmanaged,
+)
+from .drive_pipeline import run_drive_ingest_once
 from .parser import to_text
 
 router = APIRouter(prefix="/ingest/drive", tags=["ingest"])
@@ -33,149 +33,81 @@ MAX_PAGE_SIZE = int(os.getenv("INGEST_DRIVE_PAGE_SIZE", "200"))
 MAX_LIST_RETRIES = int(os.getenv("INGEST_DRIVE_LIST_RETRIES", "4"))
 LIST_BACKOFF_BASE = float(os.getenv("INGEST_DRIVE_BACKOFF_BASE", "0.8"))
 
-_SESSION_CACHE: Dict[str, str] = {}
-_SESSION_LOCK = threading.Lock()
 
-
-def fake_user():
-    class U:
-        user_id = "demo_user"
-    return U()
-
-
-def _persist_session_token(db: Session, user_id: str, session_token: str) -> None:
-    with _SESSION_LOCK:
-        _SESSION_CACHE[user_id] = session_token
-
-    row = db.get(DriveSession, user_id)
-    if row:
-        row.session_token = session_token
-    else:
-        row = DriveSession(user_id=user_id, session_token=session_token)
-        db.add(row)
-    db.commit()
-
-
-def _persist_session_token_unmanaged(user_id: str, session_token: str) -> None:
-    """
-    Persist a token using a short-lived DB session (used when we only have the
-    SessionLocal factory, e.g., inside background jobs).
-    """
-    if SessionLocal is None:
-        return
-    db = SessionLocal()
-    try:
-        _persist_session_token(db, user_id, session_token)
-    finally:
-        db.close()
-
-
-def _session_for_user(user_id: str) -> str:
-    with _SESSION_LOCK:
-        cached = _SESSION_CACHE.get(user_id)
-    if cached:
-        return cached
-
-    db = SessionLocal()
-    try:
-        row = db.get(DriveSession, user_id)
-        if row:
-            with _SESSION_LOCK:
-                _SESSION_CACHE[user_id] = row.session_token
-            return row.session_token
-    finally:
-        db.close()
-
-    env_key = f"DRIVE_SESSION_{user_id.upper()}"
-    token = os.getenv(env_key) or os.getenv("DRIVE_SESSION_TOKEN")
-    if token:
-        _persist_session_token_unmanaged(user_id, token)
-        return token
-    raise RuntimeError(
-        f"No Drive session token available for user '{user_id}'. "
-        "Register one via /ingest/drive or set DRIVE_SESSION_TOKEN."
-    )
-
-
-def _drive_service(session_token: str):
-    creds = creds_from_session(session_token)
-    if getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
-        try:
-            creds.refresh(Request())
-        except Exception as exc:  # pragma: no cover - network dependent
-            raise RuntimeError(f"Unable to refresh Drive credentials: {exc}") from exc
+def _drive_service(creds):
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
-def _ingest_with_service(
-    svc,
-    *,
-    user_id: str,
-    name_filter: Optional[str],
-    max_files: Optional[int],
-    reembed_all: bool,
-    on_progress: Optional[Callable[[int, int, str], None]],
-) -> Dict[str, int]:
-    limit = max_files or DEFAULT_JOB_MAX
-    limit = max(1, limit)
-    q = "trashed=false"
-    if name_filter:
-        q += f" and name contains '{name_filter}'"
+def _list_page_factory(svc, name_filter: Optional[str]):
+    def _list_page(user_id: str, page_token: Optional[str], page_size: int) -> Dict[str, Any]:
+        q = "trashed=false"
+        if name_filter:
+            q += f" and name contains '{name_filter}'"
+        req = (
+            svc.files()
+            .list(
+                q=q,
+                pageToken=page_token,
+                pageSize=page_size,
+                fields=(
+                    "nextPageToken, files(id,name,mimeType,md5Checksum,size,"
+                    "modifiedTime,trashed,version)"
+                ),
+            )
+        )
+        return req.execute()
 
-    files = _list_drive_files(svc, q, limit)
-    total = len(files)
+    return _list_page
 
-    if on_progress:
-        on_progress(0, total, "starting drive ingest")
 
-    ingested = 0
-    errors = 0
-    for idx, f in enumerate(files, start=1):
-        fid = f.get("id")
-        name = f.get("name", "(untitled)")
-        mime = f.get("mimeType", "")
-        try:
-            data = _download(svc, fid, mime)
-            text = to_text(data, filename=name, mime=mime)
-            if not text.strip():
-                if on_progress:
-                    on_progress(idx, total, f"skipped {name}: empty content")
-                continue
+def _fetch_file_factory(svc):
+    def _fetch_file(user_id: str, file_id: str, mime_type: Optional[str]) -> bytes:
+        return _download(svc, file_id, mime_type)
 
-            meta = {"source": "drive", "title": name, "id": fid, "mime": mime, "user_id": user_id}
-            chunks = chunk_text(text, meta=meta)
-            upsert_chunks(chunks, user_id=user_id)
-            ingested += 1
-            if on_progress:
-                on_progress(idx, total, f"ingested {name}")
-        except Exception as exc:
-            errors += 1
-            if on_progress:
-                on_progress(idx, total, f"error {name}: {exc}")
-            continue
+    return _fetch_file
 
-    return {"found": total, "ingested": ingested, "errors": errors}
+
+def _parse_bytes(content: bytes, mime: Optional[str]) -> str:
+    return to_text(content, filename="", mime=mime)
 
 
 @router.post("")
 def ingest_drive_endpoint(
-    session: str,
     limit: int = Query(20, ge=1, le=500),
     name_contains: str | None = Query(None),
-    user=Depends(fake_user),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _persist_session_token(db, user.user_id, session)
-    svc = _drive_service(session)
-    stats = _ingest_with_service(
-        svc,
-        user_id=user.user_id,
-        name_filter=name_contains,
-        max_files=limit,
-        reembed_all=False,
-        on_progress=None,
-    )
-    return stats
+    creds = get_google_credentials_for_user(db, user.user_id)
+    svc = _drive_service(creds)
+    list_page = _list_page_factory(svc, name_contains)
+    fetch_file = _fetch_file_factory(svc)
+
+    processed = embedded = errors = 0
+    next_page: Optional[str] = None
+    remaining = limit
+
+    while remaining > 0:
+        page_size = min(MAX_PAGE_SIZE, remaining)
+        summary = run_drive_ingest_once(
+            db=db,
+            user_id=user.user_id,
+            list_page=list_page,
+            fetch_file_bytes=fetch_file,
+            parse_bytes=_parse_bytes,
+            job=None,
+            page_token=next_page,
+            page_size=page_size,
+        )
+        processed += summary.get("processed", 0)
+        embedded += summary.get("embedded", 0)
+        errors += summary.get("errors", 0)
+        remaining -= summary.get("processed", 0)
+        next_page = summary.get("nextPageToken")
+        if not next_page or summary.get("processed", 0) == 0:
+            break
+
+    return {"found": processed, "ingested": embedded, "errors": errors}
 
 def _download(svc, file_id: str, mime: str | None):
     buf = io.BytesIO()
@@ -200,16 +132,49 @@ def ingest_drive(
     """
     Callable entry point for the background job system.
     """
-    session_token = _session_for_user(user_id)
-    svc = _drive_service(session_token)
-    return _ingest_with_service(
-        svc,
-        user_id=user_id,
-        name_filter=name_filter,
-        max_files=max_files,
-        reembed_all=reembed_all,
-        on_progress=on_progress,
-    )
+    limit = max_files or DEFAULT_JOB_MAX
+    limit = max(1, limit)
+
+    creds = get_google_credentials_for_user_unmanaged(user_id)
+    svc = _drive_service(creds)
+    list_page = _list_page_factory(svc, name_filter)
+    fetch_file = _fetch_file_factory(svc)
+
+    processed = embedded = errors = 0
+    page_token: Optional[str] = None
+    remaining = limit
+
+    db = SessionLocal()
+    try:
+        while remaining > 0:
+            page_size = min(MAX_PAGE_SIZE, remaining)
+            summary = run_drive_ingest_once(
+                db=db,
+                user_id=user_id,
+                list_page=list_page,
+                fetch_file_bytes=fetch_file,
+                parse_bytes=_parse_bytes,
+                job=None,
+                page_token=page_token,
+                page_size=page_size,
+                force_reembed=reembed_all,
+            )
+            processed += summary.get("processed", 0)
+            embedded += summary.get("embedded", 0)
+            errors += summary.get("errors", 0)
+            remaining -= summary.get("processed", 0)
+            page_token = summary.get("nextPageToken")
+
+            if on_progress:
+                total_hint = processed + max(remaining, 0)
+                on_progress(processed, total_hint or processed, f"embedded chunks: {embedded}")
+
+            if not page_token or summary.get("processed", 0) == 0:
+                break
+
+        return {"found": processed, "ingested": embedded, "errors": errors}
+    finally:
+        db.close()
 
 
 def ensure_drive_session(user_id: str) -> None:
@@ -217,7 +182,7 @@ def ensure_drive_session(user_id: str) -> None:
     Raise a RuntimeError if we cannot locate a session token for this user.
     Useful for validating before starting jobs.
     """
-    _session_for_user(user_id)
+    get_google_credentials_for_user_unmanaged(user_id)
 
 
 def _list_drive_files(svc, query: str, limit: int) -> List[Dict[str, Any]]:

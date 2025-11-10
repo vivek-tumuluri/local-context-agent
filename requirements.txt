@@ -11,3 +11,4 @@ chromadb
 openai
 tiktoken
 sqlalchemy
+pytest
