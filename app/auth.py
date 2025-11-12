@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -16,14 +17,40 @@ from app.db import SessionLocal, get_db
 from app.models import DriveSession, User, UserSession
 from .google_clients import build_flow
 
+from cryptography.fernet import Fernet, InvalidToken
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-secret")
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+
+_raw_session_secret = os.getenv("SESSION_SECRET")
+if not _raw_session_secret or len(_raw_session_secret) < 32:
+    if APP_ENV != "development":
+        raise RuntimeError("SESSION_SECRET must be at least 32 chars outside development.")
+    _raw_session_secret = _raw_session_secret or "dev-secret"
+SESSION_SECRET = _raw_session_secret
+
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "lc_session")
 SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
-SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
+SESSION_COOKIE_SECURE = os.getenv(
+    "SESSION_COOKIE_SECURE",
+    "0" if APP_ENV == "development" else "1",
+) == "1"
+SESSION_COOKIE_SAMESITE = os.getenv(
+    "SESSION_COOKIE_SAMESITE",
+    "lax" if APP_ENV == "development" else "strict",
+)
 STATE_SIGNER = URLSafeSerializer(SESSION_SECRET, salt="oauth-state")
 
+DRIVE_CREDENTIALS_KEY = os.getenv("DRIVE_CREDENTIALS_KEY")
+_fernet: Optional[Fernet] = None
+if DRIVE_CREDENTIALS_KEY:
+    try:
+        _fernet = Fernet(DRIVE_CREDENTIALS_KEY)
+    except Exception as exc:
+        raise RuntimeError("DRIVE_CREDENTIALS_KEY must be a valid Fernet key.") from exc
+elif APP_ENV != "development":
+    raise RuntimeError("DRIVE_CREDENTIALS_KEY is required outside development.")
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -46,7 +73,7 @@ def _random_token() -> str:
 
 
 def _serialize_credentials(creds: Credentials) -> Dict[str, Any]:
-    return {
+    payload = {
         "token": creds.token,
         "refresh_token": creds.refresh_token,
         "token_uri": creds.token_uri,
@@ -54,6 +81,23 @@ def _serialize_credentials(creds: Credentials) -> Dict[str, Any]:
         "client_secret": creds.client_secret,
         "scopes": list(creds.scopes or []),
     }
+    if not _fernet:
+        return payload
+    blob = json.dumps(payload).encode("utf-8")
+    ciphertext = _fernet.encrypt(blob).decode("utf-8")
+    return {"ciphertext": ciphertext}
+
+
+def _deserialize_credentials(data: Dict[str, Any]) -> Dict[str, Any]:
+    if "ciphertext" not in data:
+        return data
+    if not _fernet:
+        raise RuntimeError("Encrypted Google credentials present but DRIVE_CREDENTIALS_KEY is not configured.")
+    try:
+        decrypted = _fernet.decrypt(data["ciphertext"].encode("utf-8"))
+    except InvalidToken as exc:
+        raise RuntimeError("Stored Google credentials could not be decrypted; reconnect your Google account.") from exc
+    return json.loads(decrypted.decode("utf-8"))
 
 
 def _set_session_cookie(response: RedirectResponse, token: str) -> None:
@@ -64,7 +108,7 @@ def _set_session_cookie(response: RedirectResponse, token: str) -> None:
         max_age=max_age,
         httponly=True,
         secure=SESSION_COOKIE_SECURE,
-        samesite="lax",
+        samesite=SESSION_COOKIE_SAMESITE,
     )
 
 
@@ -130,9 +174,8 @@ def _extract_session_token(request: Request) -> Optional[str]:
     if authz.lower().startswith("bearer "):
         header_token = authz.split(" ", 1)[1].strip()
     alt_header = request.headers.get("X-Session")
-    param_token = request.query_params.get("session")
 
-    return cookie or header_token or alt_header or param_token
+    return cookie or header_token or alt_header
 
 
 def _load_session(db: Session, token: str) -> UserSession:
@@ -164,13 +207,14 @@ class _MissingCredentials(RuntimeError):
 
 
 def _build_credentials(data: Dict[str, Any]) -> Credentials:
+    decoded = _deserialize_credentials(data or {})
     return Credentials(
-        token=data.get("token"),
-        refresh_token=data.get("refresh_token"),
-        token_uri=data.get("token_uri"),
-        client_id=data.get("client_id"),
-        client_secret=data.get("client_secret"),
-        scopes=data.get("scopes"),
+        token=decoded.get("token"),
+        refresh_token=decoded.get("refresh_token"),
+        token_uri=decoded.get("token_uri"),
+        client_id=decoded.get("client_id"),
+        client_secret=decoded.get("client_secret"),
+        scopes=decoded.get("scopes"),
     )
 
 
@@ -244,7 +288,7 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     _persist_google_credentials(db, user.id, creds)
     session_token = _issue_session(db, user)
 
-    response = RedirectResponse(url=f"/auth/debug/authed?token={session_token}", status_code=303)
+    response = RedirectResponse(url=f"/auth/me", status_code=303)
     _set_session_cookie(response, session_token)
     return response
 
@@ -259,20 +303,3 @@ def me(user: User = Depends(get_current_user)):
             "picture": user.picture,
         }
     }
-
-
-@router.get("/debug/authed", response_class=HTMLResponse)
-def authed(token: Optional[str] = None):
-    body_token = token or "(check your cookies)"
-    return f"""
-    <html>
-      <body style=\"font-family: ui-monospace, Menlo, monospace; padding: 24px;\">
-        <h2>Authenticated ✔</h2>
-        <p>Your session token is stored as an HttpOnly cookie named <code>{SESSION_COOKIE_NAME}</code>.</p>
-        <p>For API testing you can also copy the token below and send it via <code>Authorization: Bearer &lt;token&gt;</code>.</p>
-        <pre style=\"white-space: pre-wrap; word-break: break-all; background:#f5f5f5; padding:12px; border-radius:8px;\">
-{body_token}
-        </pre>
-      </body>
-    </html>
-    """

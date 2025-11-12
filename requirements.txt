@@ -12,3 +12,4 @@ openai
 tiktoken
 sqlalchemy
 pytest
+cryptography
