@@ -1,0 +1,1 @@
+FAQ: Customer questions are routed through the support alias and summarized weekly.

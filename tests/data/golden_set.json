@@ -1,0 +1,62 @@
+[
+  {
+    "query": "What are the key milestones for the product launch?",
+    "documents": [
+      {
+        "id": "launch_plan:0",
+        "text": "Launch plan draft outlines design freeze on April 18 and QA freeze on May 2.",
+        "relevant": true
+      },
+      {
+        "id": "notes:3",
+        "text": "General meeting notes without launch specifics.",
+        "relevant": false
+      },
+      {
+        "id": "retro:1",
+        "text": "Post-launch retrospective focusing on telemetry gaps.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "query": "Who owns the customer update emails?",
+    "documents": [
+      {
+        "id": "owners:0",
+        "text": "Marketing plan assigns customer update emails to Priya with backups from Leo.",
+        "relevant": true
+      },
+      {
+        "id": "owners:1",
+        "text": "Support escalation document describing pager rotation.",
+        "relevant": false
+      },
+      {
+        "id": "launch_plan:2",
+        "text": "Launch plan appendix about experiments.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "query": "When does telemetry collection begin?",
+    "documents": [
+      {
+        "id": "telemetry:0",
+        "text": "Telemetry collection kicks off one week after QA freeze, targeting May 9.",
+        "relevant": true
+      },
+      {
+        "id": "retro:0",
+        "text": "Retro mentions telemetry improvements.",
+        "relevant": true
+      },
+      {
+        "id": "misc:5",
+        "text": "Misc file without related data.",
+        "relevant": false
+      }
+    ]
+  }
+]

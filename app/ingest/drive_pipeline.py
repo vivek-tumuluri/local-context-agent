@@ -1,14 +1,49 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, Any, Iterable, Optional, List, Callable
+from typing import Dict, Any, Optional, List, Callable
 from sqlalchemy.orm import Session
 
-from app.models import ContentIndex, IngestionJob
+from app.models import ContentIndex, IngestionJob, SourceState
 from app.ingest.text_normalize import normalize_text, compute_content_hash
 from app.ingest.should_ingest import should_reingest
 from app.ingest.chunking import split_by_chars
 from app.rag import vector
+
+DRIVE_SOURCE = "drive"
+
+
+def _load_source_state(db: Session, user_id: str) -> Optional[SourceState]:
+    return (
+        db.query(SourceState)
+        .filter(SourceState.user_id == user_id, SourceState.source == DRIVE_SOURCE)
+        .one_or_none()
+    )
+
+
+def load_drive_cursor(db: Session, user_id: str) -> Optional[str]:
+    state = _load_source_state(db, user_id)
+    return state.cursor_token if state else None
+
+
+def save_drive_cursor(
+    db: Session,
+    user_id: str,
+    cursor_token: Optional[str],
+    *,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    state = _load_source_state(db, user_id)
+    now = datetime.now(timezone.utc)
+    if state is None:
+        state = SourceState(user_id=user_id, source=DRIVE_SOURCE)
+        db.add(state)
+    state.cursor_token = cursor_token
+    state.last_sync = now if cursor_token is None else state.last_sync or now
+    if extra is not None:
+        state.extra = extra
+    state.updated_at = now
+    db.commit()
 
 
 def _to_dt(val) -> Optional[datetime]:
@@ -142,8 +177,12 @@ def process_drive_file(
         result["processed"] = 1
         return result
 
-    vector.delete_by_doc_id(fid, user_id=user_id)
+    existing_ids = vector.list_doc_chunk_ids(fid, user_id=user_id)
     summary = _embed_text(user_id, fid, normalized, chash)
+    new_ids = set(summary.get("ids", []))
+    stale_ids = [cid for cid in existing_ids if cid not in new_ids]
+    if stale_ids:
+        vector.delete_ids(stale_ids, user_id=user_id)
     _upsert_row(db, user_id, file_meta, chash)
 
     result["processed"] = 1
@@ -164,14 +203,16 @@ def run_drive_ingest_once(
 ) -> Dict[str, Any]:
     processed = embedded = errors = 0
     next_token = None
+    listing_failed = False
 
     try:
         listing = list_page(user_id=user_id, page_token=page_token, page_size=page_size)
-        files: Iterable[Dict[str, Any]] = listing.get("files", [])
+        files: List[Dict[str, Any]] = list(listing.get("files", []) or [])
         next_token = listing.get("nextPageToken")
         if job:
-            job.total_files = (job.total_files or 0) + len(list(files))
+            job.total_files = (job.total_files or 0) + len(files)
     except Exception as e:
+        listing_failed = True
         if job:
             job.status = "failed"
             job.error_summary = f"list error: {e}"
@@ -208,4 +249,5 @@ def run_drive_ingest_once(
         "embedded": embedded,
         "errors": errors,
         "nextPageToken": next_token,
+        "listing_failed": listing_failed,
     }

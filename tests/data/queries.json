@@ -1,0 +1,21 @@
+[
+  {
+    "query": "Summarize the launch milestones",
+    "context": ["Launch plan draft outlines design freeze on April 18 and QA freeze on May 2."]
+  },
+  {
+    "query": "Who owns the customer updates?",
+    "context": ["Marketing plan assigns customer update emails to Priya with backups from Leo."]
+  },
+  {
+    "query": "When does telemetry collection begin?",
+    "context": ["Telemetry collection kicks off one week after QA freeze, targeting May 9."]
+  },
+  {
+    "query": "What happens right after QA freeze?",
+    "context": [
+      "Launch plan draft outlines design freeze on April 18 and QA freeze on May 2.",
+      "Telemetry collection kicks off one week after QA freeze, targeting May 9."
+    ]
+  }
+]

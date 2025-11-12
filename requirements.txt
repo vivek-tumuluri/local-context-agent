@@ -12,4 +12,6 @@ openai
 tiktoken
 sqlalchemy
 pytest
+pytest-asyncio
+pytest-cov
 cryptography

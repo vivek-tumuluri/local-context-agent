@@ -96,9 +96,9 @@ Both endpoints embed the query via OpenAI, query the user’s Chroma collection,
 ## Testing
 ```bash
 source .venv/bin/activate
-python -m pytest
+pytest -q
 ```
-Covers auth/session helpers, text normalization/hash consistency, chunking, and `should_reingest` edge cases. Add more coverage as you extend the pipelines.
+The suite runs deterministically with network access disabled by default (set `ALLOW_NETWORK=1` to opt in). It enforces coverage on `app/` via `pytest.ini`, provides @perf markers for optional synthetic benchmarks, and includes golden retrieval datasets plus in-memory fakes for OpenAI, Google APIs, and Chroma. Use `pytest -q -k "not perf"` in CI for the fast path.
 
 ## Roadmap Ideas
 - Swap FastAPI background tasks for a real worker (Celery/RQ) to handle long-running jobs and retries.

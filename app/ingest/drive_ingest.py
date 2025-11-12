@@ -16,7 +16,11 @@ from ..auth import (
     get_google_credentials_for_user,
     get_google_credentials_for_user_unmanaged,
 )
-from .drive_pipeline import run_drive_ingest_once
+from .drive_pipeline import (
+    run_drive_ingest_once,
+    load_drive_cursor,
+    save_drive_cursor,
+)
 from .parser import to_text
 
 router = APIRouter(prefix="/ingest/drive", tags=["ingest"])
@@ -84,7 +88,8 @@ def ingest_drive_endpoint(
     fetch_file = _fetch_file_factory(svc)
 
     processed = embedded = errors = 0
-    next_page: Optional[str] = None
+    use_cursor = name_contains is None
+    next_page: Optional[str] = load_drive_cursor(db, user.user_id) if use_cursor else None
     remaining = limit
 
     while remaining > 0:
@@ -104,6 +109,8 @@ def ingest_drive_endpoint(
         errors += summary.get("errors", 0)
         remaining -= summary.get("processed", 0)
         next_page = summary.get("nextPageToken")
+        if use_cursor and not summary.get("listing_failed"):
+            save_drive_cursor(db, user.user_id, next_page)
         if not next_page or summary.get("processed", 0) == 0:
             break
 
@@ -141,11 +148,14 @@ def ingest_drive(
     fetch_file = _fetch_file_factory(svc)
 
     processed = embedded = errors = 0
+    use_cursor = not reembed_all and name_filter is None
     page_token: Optional[str] = None
     remaining = limit
 
     db = SessionLocal()
     try:
+        if use_cursor:
+            page_token = load_drive_cursor(db, user_id)
         while remaining > 0:
             page_size = min(MAX_PAGE_SIZE, remaining)
             summary = run_drive_ingest_once(
@@ -164,6 +174,8 @@ def ingest_drive(
             errors += summary.get("errors", 0)
             remaining -= summary.get("processed", 0)
             page_token = summary.get("nextPageToken")
+            if use_cursor and not summary.get("listing_failed"):
+                save_drive_cursor(db, user_id, page_token)
 
             if on_progress:
                 total_hint = processed + max(remaining, 0)

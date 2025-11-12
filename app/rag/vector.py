@@ -222,7 +222,7 @@ def upsert(chunks: List[Dict[str, Any]], user_id: Optional[str] = None) -> Dict[
       }
     Returns a summary: {"batches": X, "added": Y, "errors": Z}
     """
-    summary = {"batches": 0, "added": 0, "errors": 0}
+    summary = {"batches": 0, "added": 0, "errors": 0, "ids": []}
     if not chunks:
         return summary
 
@@ -260,6 +260,7 @@ def upsert(chunks: List[Dict[str, Any]], user_id: Optional[str] = None) -> Dict[
             col.upsert(ids=ids[:n], documents=docs[:n], metadatas=metas[:n], embeddings=vecs)
             summary["batches"] += 1
             summary["added"] += n
+            summary["ids"].extend(ids[:n])
         except Exception as e:
             summary["errors"] += 1
             log.error("[vector] Skipping batch %d-%d after error: %s", i, i + len(batch), e)
@@ -333,6 +334,39 @@ def delete_by_doc_id(doc_id: str, user_id: Optional[str] = None) -> Dict[str, in
     except Exception as e:
         log.error("[vector] delete_by_doc_id failed: %s", e)
         return {"deleted": 0}
+
+
+def list_doc_chunk_ids(doc_id: str, user_id: Optional[str] = None) -> List[str]:
+    try:
+        col = _col(user_id=user_id)
+    except VectorStoreReset:
+        return []
+    try:
+        res: GetResult = col.get(where={"doc_id": doc_id})
+    except Exception as exc:
+        log.error("[vector] list_doc_chunk_ids failed: %s", exc)
+        return []
+    ids = res.get("ids") or []
+    return list(ids)
+
+
+def delete_ids(ids: List[str], user_id: Optional[str] = None) -> int:
+    if not ids:
+        return 0
+    try:
+        col = _col(user_id=user_id)
+    except VectorStoreReset:
+        return 0
+    try:
+        col.delete(ids=ids)
+        try:
+            _db().persist()
+        except Exception:
+            pass
+        return len(ids)
+    except Exception as exc:
+        log.error("[vector] delete_ids failed: %s", exc)
+        return 0
 
 
 def reset_collection(user_id: Optional[str] = None, name: Optional[str] = None) -> None:
