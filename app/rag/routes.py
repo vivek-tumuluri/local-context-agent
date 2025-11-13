@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from typing import List, Dict, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +10,9 @@ from pydantic import BaseModel, Field
 from openai import OpenAI
 
 from app.auth import csrf_protect, get_current_user
+from app.limits import check_rag_quota
 from app.rag.vector import query as vec_query
+from app.logging_utils import log_event
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
@@ -174,10 +177,25 @@ def rag_search(
     user=Depends(get_current_user),
     _csrf=Depends(csrf_protect),
 ):
-
+    start = time.perf_counter()
+    log_event(
+        "rag_search_start",
+        user_id=user.user_id,
+        k=body.k,
+        source=body.source,
+        query_chars=len(body.query or ""),
+    )
     hits = vec_query(body.query, k=body.k, user_id=user.user_id)
     hits = _filter_hits(hits, body.source)
     hits = _annotate_hit_confidence(hits)
+    duration_ms = round((time.perf_counter() - start) * 1000, 3)
+    log_event(
+        "rag_search_completed",
+        user_id=user.user_id,
+        hits=len(hits),
+        duration_ms=duration_ms,
+        source=body.source,
+    )
     return {
         "results": hits,
         "hits": len(hits),
@@ -192,13 +210,31 @@ def rag_answer(
     _csrf=Depends(csrf_protect),
 ):
     _require_openai()
+    check_rag_quota(user.user_id)
 
+    overall_start = time.perf_counter()
+    log_event(
+        "rag_answer_start",
+        user_id=user.user_id,
+        k=body.k,
+        source=body.source,
+        max_ctx_chars=body.max_ctx_chars,
+        allow_partial=body.allow_partial,
+        query_chars=len(body.query or ""),
+    )
 
     hits = vec_query(body.query, k=body.k * 2, user_id=user.user_id)
     hits = _filter_hits(hits, body.source)
     hits = _annotate_hit_confidence(hits)[: body.k]
 
     if not hits:
+        duration_ms = round((time.perf_counter() - overall_start) * 1000, 3)
+        log_event(
+            "rag_answer_no_hits",
+            user_id=user.user_id,
+            duration_ms=duration_ms,
+            source=body.source,
+        )
         return {
             "answer": "I don’t know based on the synced data.",
             "sources": [],
@@ -210,6 +246,14 @@ def rag_answer(
     prompt = _answer_prompt(context, body.query, body.allow_partial)
 
     try:
+        chat_start = time.perf_counter()
+        log_event(
+            "openai_call_start",
+            user_id=user.user_id,
+            model=ANSWER_MODEL,
+            context_chars=len(context),
+            query_chars=len(body.query or ""),
+        )
         resp = oai.chat.completions.create(
             model=ANSWER_MODEL,
             messages=[
@@ -219,8 +263,34 @@ def rag_answer(
             temperature=0,
         )
         answer = (resp.choices[0].message.content or "").strip()
+        usage = getattr(resp, "usage", None)
+        log_event(
+            "openai_call_ok",
+            user_id=user.user_id,
+            model=ANSWER_MODEL,
+            duration_ms=round((time.perf_counter() - chat_start) * 1000, 3),
+            prompt_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
+            completion_tokens=getattr(usage, "completion_tokens", None) if usage else None,
+        )
     except Exception as e:
+        log_event(
+            "openai_call_error",
+            user_id=user.user_id,
+            model=ANSWER_MODEL,
+            error=str(e),
+            duration_ms=round((time.perf_counter() - chat_start) * 1000, 3),
+            level="error",
+        )
         raise HTTPException(status_code=502, detail=f"Answer generation failed: {e}")
+
+    duration_ms = round((time.perf_counter() - overall_start) * 1000, 3)
+    log_event(
+        "rag_answer_completed",
+        user_id=user.user_id,
+        retrieved=len(hits),
+        duration_ms=duration_ms,
+        confidence=_confidence(hits),
+    )
 
     return {
         "answer": answer,

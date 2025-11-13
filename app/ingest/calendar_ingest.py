@@ -4,6 +4,7 @@ from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.runtime import ensure_writes_enabled
 from ..auth import csrf_protect, get_current_user, get_google_credentials_for_user
 from ..rag.chunk import chunk_text
 from ..rag.vector import upsert as upsert_chunks
@@ -17,6 +18,7 @@ def ingest_calendar(
     db: Session = Depends(get_db),
     _csrf=Depends(csrf_protect),
 ):
+    ensure_writes_enabled()
     creds = get_google_credentials_for_user(db, user.user_id)
     svc = build("calendar", "v3", credentials=creds)
 

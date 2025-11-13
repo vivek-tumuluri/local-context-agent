@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Optional, Callable, Protocol
 import inspect
+import time
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Depends as FastAPIDepends
 from pydantic import BaseModel
 
 
@@ -17,7 +18,10 @@ from sqlalchemy.orm import Session
 
 
 from app.ingest import job_helper, queue as ingest_queue
+from app.limits import check_ingest_quota
+from app.runtime import ensure_writes_enabled
 from app.auth import csrf_protect, get_current_user
+from app.logging_utils import log_event
 
 
 class DriveIngestCallable(Protocol):
@@ -135,6 +139,9 @@ def start_drive_ingest(
             "existing": True,
         }
 
+    ensure_writes_enabled()
+    check_ingest_quota(user.user_id)
+
     job_id = job_helper.create_job(
         db,
         user_id=user.user_id,
@@ -200,27 +207,35 @@ def _run_drive_job(job_id: str) -> None:
     Uses its own DB session independent of the request.
     """
     db = _bg_db_session()
+    start_time = time.perf_counter()
+    user_id = None
     try:
         job = job_helper.get_job(db, job_id)
         if not job:
+            log_event("ingest_job_missing", job_id=job_id, mode="inline", level="warning")
             return
 
         payload = job.get("payload") or {}
         user_id = payload.get("user_id")
         if not user_id:
             job_helper.finish_job(db, job_id, status="failed", error_summary="missing user_id in job payload")
+            _log_inline_failure(job_id, user_id, start_time, "missing user_id in job payload")
             return
 
-
+        log_event(
+            "ingest_job_start",
+            job_id=job_id,
+            user_id=user_id,
+            attempt=1,
+            max_attempts=1,
+            mode="inline",
+        )
         job_helper.mark_job_running(db, job_id, total_files=0)
 
         ingest_callable = INGEST_DRIVE_CALLABLE
         last_reported = 0
 
-
         def on_progress(done: int, total: int, msg: str = ""):
-
-
             if total is not None and total >= 0:
                 job_helper.mark_job_running(db, job_id, total_files=int(total))
 
@@ -233,7 +248,6 @@ def _run_drive_job(job_id: str) -> None:
             elif msg:
                 job_helper.append_job_log(db, job_id, msg)
 
-
         try:
             ingest_callable(
                 user_id=user_id,
@@ -244,16 +258,40 @@ def _run_drive_job(job_id: str) -> None:
             )
         except NotImplementedError as err:
             job_helper.finish_job(db, job_id, status="failed", error_summary=str(err))
+            _log_inline_failure(job_id, user_id, start_time, str(err))
             return
 
-
         job_helper.finish_job(db, job_id, status="succeeded")
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 3)
+        log_event(
+            "ingest_job_completed",
+            job_id=job_id,
+            user_id=user_id,
+            status="succeeded",
+            duration_ms=duration_ms,
+            mode="inline",
+        )
 
     except Exception as e:  # pragma: no cover
-
         try:
             job_helper.finish_job(db, job_id, status="failed", error_summary=str(e))
         except Exception:
             pass
+        _log_inline_failure(job_id, user_id, start_time, str(e))
+        raise
     finally:
         db.close()
+
+
+def _log_inline_failure(job_id: str, user_id: Optional[str], start_time: float, error: str) -> None:
+    duration_ms = round((time.perf_counter() - start_time) * 1000, 3)
+    log_event(
+        "ingest_job_failed",
+        job_id=job_id,
+        user_id=user_id,
+        status="failed",
+        duration_ms=duration_ms,
+        error=error,
+        mode="inline",
+        level="error",
+    )

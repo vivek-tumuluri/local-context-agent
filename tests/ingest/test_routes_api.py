@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.ingest import job_helper, routes as ingest_routes
+from fastapi import HTTPException
 
 
 @pytest.mark.asyncio
@@ -65,6 +66,30 @@ async def test_start_drive_ingest_returns_existing_job(api_client, db_session, t
     body = resp.json()
     assert body["existing"] is True
     assert body["job_id"] == job_id
+
+
+@pytest.mark.asyncio
+async def test_start_drive_ingest_respects_quota(api_client, monkeypatch, test_user):
+    monkeypatch.setattr(ingest_routes, "ENSURE_DRIVE_SESSION", lambda user_id: None)
+
+    def quota(*args, **kwargs):
+        raise HTTPException(status_code=429, detail="limit")
+
+    monkeypatch.setattr(ingest_routes, "check_ingest_quota", quota)
+    resp = await api_client.post("/ingest/drive/start", json={})
+    assert resp.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_start_drive_ingest_read_only(api_client, monkeypatch, test_user):
+    monkeypatch.setattr(ingest_routes, "ENSURE_DRIVE_SESSION", lambda user_id: None)
+
+    def deny():
+        raise HTTPException(status_code=503, detail="ro")
+
+    monkeypatch.setattr(ingest_routes, "ensure_writes_enabled", deny)
+    resp = await api_client.post("/ingest/drive/start", json={})
+    assert resp.status_code == 503
 
 
 @pytest.mark.asyncio

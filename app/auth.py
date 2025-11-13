@@ -25,6 +25,7 @@ from app.models import (
 )
 from .google_clients import build_flow
 from app.rag import vector
+from app.runtime import ensure_writes_enabled
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -252,6 +253,10 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = db.get(User, session.user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User for session not found")
+    # make the user id available for downstream logging/middleware
+    state = getattr(request, "state", None)
+    if state is not None:
+        setattr(state, "user_id", user.id)
     return user
 
 
@@ -358,6 +363,7 @@ def get_google_credentials_for_user_unmanaged(user_id: str) -> Credentials:
 
 @router.get("/google")
 def start_google_auth():
+    ensure_writes_enabled()
     flow = build_flow()
     flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI")
     state_payload = {"nonce": secrets.token_urlsafe(16)}
@@ -373,6 +379,7 @@ def start_google_auth():
 
 @router.get("/google/callback")
 def google_callback(code: str, state: str, db: Session = Depends(get_db)):
+    ensure_writes_enabled()
     try:
         STATE_SIGNER.loads(state)
     except BadSignature as exc:
@@ -428,6 +435,7 @@ def disconnect(
     db: Session = Depends(get_db),
     _csrf=Depends(csrf_protect),
 ):
+    ensure_writes_enabled()
     summary = _delete_user_data(db, user.id)
     _clear_session_state(response)
     return {"status": "ok", "deleted": summary}

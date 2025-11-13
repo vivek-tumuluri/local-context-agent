@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 
 from app.rag import routes as rag_routes
 from app.rag import vector
@@ -35,3 +36,13 @@ def test_pack_context_truncates_long_text():
     ]
     context = rag_routes._pack_context(hits, max_chars=1000)
     assert context.count("[truncated]") == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_answer_respects_quota(api_client, monkeypatch, fake_vector_env, fake_chat_client, test_user):
+    def quota(user_id):
+        raise HTTPException(status_code=429, detail="limit")
+
+    monkeypatch.setattr(rag_routes, "check_rag_quota", quota)
+    resp = await api_client.post("/rag/answer", json={"query": "test", "k": 1})
+    assert resp.status_code == 429

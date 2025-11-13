@@ -1,13 +1,15 @@
 import os
 import socket
+import time
 from typing import Any, Dict, Optional
 
 from redis import Redis, from_url
 from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutError as RedisTimeoutError
-from rq import Queue, Retry
+from rq import Queue, Retry, get_current_job
 
 from app import db as app_db
 from app.ingest import drive_ingest, job_helper
+from app.logging_utils import log_event
 
 
 _redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -24,19 +26,99 @@ RETRY_POLICY = Retry(max=3, interval=[10, 60])
 TRANSIENT_STATUSES = {429, 500, 502, 503, 504}
 
 
+def _ingest_attempt_context() -> Dict[str, Any]:
+    ctx: Dict[str, Any] = {"attempt": 1, "max_attempts": (RETRY_POLICY.max + 1) if RETRY_POLICY else None}
+    try:
+        job = get_current_job()
+    except Exception:  # pragma: no cover - defensive when not run via worker
+        job = None
+    if not job:
+        return ctx
+    ctx["rq_job_id"] = job.id
+    attempt = int(job.meta.get("attempt", 0)) + 1
+    job.meta["attempt"] = attempt
+    job.save_meta()
+    ctx["attempt"] = attempt
+    retries_left = getattr(job, "retries_left", None)
+    if retries_left is not None and RETRY_POLICY:
+        ctx["max_attempts"] = RETRY_POLICY.max + 1
+        ctx["retries_left"] = retries_left
+    return ctx
+
+
 def _run_ingest(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     db = app_db.SessionLocal()
+    timing_start = time.perf_counter()
+    user_id = payload.get("user_id")
+    attempt_ctx = _ingest_attempt_context()
+    log_event(
+        "ingest_job_start",
+        job_id=job_id,
+        user_id=user_id,
+        attempt=attempt_ctx.get("attempt"),
+        max_attempts=attempt_ctx.get("max_attempts"),
+        rq_job_id=attempt_ctx.get("rq_job_id"),
+    )
     try:
+        job_record = job_helper.get_job(db, job_id)
+        if not job_record:
+            log_event(
+                "ingest_job_missing",
+                job_id=job_id,
+                user_id=user_id,
+                attempt=attempt_ctx.get("attempt"),
+                max_attempts=attempt_ctx.get("max_attempts"),
+                rq_job_id=attempt_ctx.get("rq_job_id"),
+                level="warning",
+            )
+            return {}
+
         job_helper.mark_job_running(db, job_id, total_files=0)
         result = drive_ingest.ingest_drive(**payload)
         job_helper.finish_job(db, job_id, status="succeeded", metrics=result)
+        duration_ms = round((time.perf_counter() - timing_start) * 1000, 3)
+        log_event(
+            "ingest_job_completed",
+            job_id=job_id,
+            user_id=user_id,
+            status="succeeded",
+            duration_ms=duration_ms,
+            attempt=attempt_ctx.get("attempt"),
+            max_attempts=attempt_ctx.get("max_attempts"),
+            rq_job_id=attempt_ctx.get("rq_job_id"),
+            metrics=result,
+        )
         return result
     except Exception as exc:  # pragma: no cover
         summary = _format_error(exc)
+        duration_ms = round((time.perf_counter() - timing_start) * 1000, 3)
         if _is_transient_error(exc):
             job_helper.record_job_error(db, job_id, f"Transient error: {summary}")
+            log_event(
+                "ingest_job_retry",
+                job_id=job_id,
+                user_id=user_id,
+                duration_ms=duration_ms,
+                error=summary,
+                attempt=attempt_ctx.get("attempt"),
+                max_attempts=attempt_ctx.get("max_attempts"),
+                rq_job_id=attempt_ctx.get("rq_job_id"),
+                level="warning",
+            )
             raise
         job_helper.finish_job(db, job_id, status="failed", error_summary=summary)
+        log_event(
+            "ingest_job_failed",
+            job_id=job_id,
+            user_id=user_id,
+            status="failed",
+            duration_ms=duration_ms,
+            error=summary,
+            attempt=attempt_ctx.get("attempt"),
+            max_attempts=attempt_ctx.get("max_attempts"),
+            rq_job_id=attempt_ctx.get("rq_job_id"),
+            level="error",
+        )
         raise
     finally:
         db.close()
