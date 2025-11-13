@@ -249,7 +249,7 @@ def _run_drive_job(job_id: str) -> None:
                 job_helper.append_job_log(db, job_id, msg)
 
         try:
-            ingest_callable(
+            result = ingest_callable(
                 user_id=user_id,
                 name_filter=payload.get("query"),
                 max_files=payload.get("max_files"),
@@ -260,8 +260,14 @@ def _run_drive_job(job_id: str) -> None:
             job_helper.finish_job(db, job_id, status="failed", error_summary=str(err))
             _log_inline_failure(job_id, user_id, start_time, str(err))
             return
+        errors = int((result or {}).get("errors") or 0)
+        if errors:
+            summary = f"Ingest completed with {errors} error(s)."
+            job_helper.finish_job(db, job_id, status="failed", error_summary=summary, metrics=result)
+            _log_inline_failure(job_id, user_id, start_time, summary)
+            return
 
-        job_helper.finish_job(db, job_id, status="succeeded")
+        job_helper.finish_job(db, job_id, status="succeeded", metrics=result)
         duration_ms = round((time.perf_counter() - start_time) * 1000, 3)
         log_event(
             "ingest_job_completed",

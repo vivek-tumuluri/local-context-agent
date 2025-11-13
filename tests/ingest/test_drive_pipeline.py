@@ -117,6 +117,57 @@ def test_process_drive_file_does_not_delete_on_embedding_failure(monkeypatch, db
     assert deleted["called"] is False
 
 
+def test_process_drive_file_skips_when_parse_returns_empty(monkeypatch, db_session, test_user, fake_vector_env):
+    drive_pipeline.process_drive_file(
+        db_session,
+        user_id=test_user.id,
+        file_meta=_make_file("doc-skip", version="1", modifiedTime=None),
+        fetch_file_bytes=lambda **_: b"content",
+        parse_bytes=lambda data, mime: "some text",
+    )
+
+    deleted = {"called": False}
+    monkeypatch.setattr(drive_pipeline.vector, "delete_ids", lambda *args, **kwargs: deleted.update(called=True))
+    monkeypatch.setattr(drive_pipeline.vector, "list_doc_chunk_ids", lambda *args, **kwargs: ["doc-skip-0"])
+
+    summary = drive_pipeline.process_drive_file(
+        db_session,
+        user_id=test_user.id,
+        file_meta=_make_file("doc-skip", version="2", modifiedTime=None),
+        fetch_file_bytes=lambda **_: b"new",
+        parse_bytes=lambda data, mime: "",
+    )
+    assert summary["embedded"] == 0
+    assert deleted["called"] is False
+
+
+def test_process_drive_file_raises_when_embeddings_return_no_chunks(monkeypatch, db_session, test_user, fake_vector_env):
+    first_text = "A" * 1300
+    second_text = "New content forcing reembed"
+    drive_pipeline.process_drive_file(
+        db_session,
+        user_id=test_user.id,
+        file_meta=_make_file("doc-empty", version="1", modifiedTime=None),
+        fetch_file_bytes=lambda **_: first_text.encode(),
+        parse_bytes=lambda data, mime: data.decode(),
+    )
+
+    def fake_upsert(*args, **kwargs):
+        return {"added": 0, "errors": 0, "ids": []}
+
+    monkeypatch.setattr(drive_pipeline.vector, "upsert", fake_upsert)
+    monkeypatch.setattr(drive_pipeline.vector, "list_doc_chunk_ids", lambda *args, **kwargs: ["ext-id"])
+
+    with pytest.raises(RuntimeError, match="returned no chunks"):
+        drive_pipeline.process_drive_file(
+            db_session,
+            user_id=test_user.id,
+            file_meta=_make_file("doc-empty", version="2", modifiedTime=None),
+            fetch_file_bytes=lambda **_: second_text.encode(),
+            parse_bytes=lambda data, mime: data.decode(),
+        )
+
+
 def test_run_drive_ingest_once_handles_listing_errors(db_session, test_user):
     job = IngestionJob(id="job-1", user_id=test_user.id, status="running", processed_files=0, total_files=0)
     db_session.add(job)
@@ -125,15 +176,15 @@ def test_run_drive_ingest_once_handles_listing_errors(db_session, test_user):
     def bad_list(**kwargs):
         raise RuntimeError("throttle")
 
-    summary = drive_pipeline.run_drive_ingest_once(
-        db_session,
-        user_id=test_user.id,
-        list_page=bad_list,
-        fetch_file_bytes=lambda **_: b"",
-        parse_bytes=lambda data, mime: "",
-        job=job,
-    )
-    assert summary["errors"] == 1
+    with pytest.raises(RuntimeError, match="Drive listing failed"):
+        drive_pipeline.run_drive_ingest_once(
+            db_session,
+            user_id=test_user.id,
+            list_page=bad_list,
+            fetch_file_bytes=lambda **_: b"",
+            parse_bytes=lambda data, mime: "",
+            job=job,
+        )
     db_session.refresh(job)
     assert job.status == "failed"
     assert "list error" in (job.error_summary or "")
@@ -146,3 +197,24 @@ def test_save_and_load_drive_cursor(db_session, test_user):
     assert token == "token-1"
     state = db_session.get(SourceState, (test_user.id, drive_pipeline.DRIVE_SOURCE))
     assert state.extra == {"seen": 5}
+
+
+def test_process_drive_file_attaches_drive_metadata(db_session, fake_vector_env, test_user):
+    file_meta = _make_file("doc-meta", name="Launch Plan", mimeType="application/pdf")
+    drive_pipeline.process_drive_file(
+        db_session,
+        user_id=test_user.id,
+        file_meta=file_meta,
+        fetch_file_bytes=lambda **_: b"launch content",
+        parse_bytes=lambda data, mime: data.decode(),
+    )
+    fake_client, _ = fake_vector_env
+    key = vector_module._collection_key(user_id=test_user.id)
+    collection = fake_client.collections[key]
+    assert collection.rows, "expected chunks to be stored"
+    sample_row = next(iter(collection.rows.values()))
+    meta = sample_row.meta
+    assert meta["source"] == "drive"
+    assert meta["title"] == "Launch Plan"
+    assert meta["doc_id"] == "doc-meta"
+    assert meta["link"].endswith("/doc-meta/view")

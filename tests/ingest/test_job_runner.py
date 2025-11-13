@@ -49,3 +49,24 @@ def test_run_drive_job_fails_when_payload_missing_user(db_session, monkeypatch):
     job = job_helper.get_job(db_session, job_id)
     assert job["status"] == "failed"
     assert "missing user_id" in (job["error_summary"] or "")
+
+
+def test_run_drive_job_fails_when_ingest_reports_errors(db_session, session_factory, test_user, monkeypatch):
+    job_id = job_helper.create_job(
+        db_session,
+        user_id=test_user.id,
+        payload={"user_id": test_user.id},
+        total_files=0,
+        status="queued",
+    )
+
+    def fake_ingest(**kwargs):
+        return {"found": 1, "ingested": 0, "errors": 1}
+
+    monkeypatch.setattr(ingest_routes, "INGEST_DRIVE_CALLABLE", fake_ingest)
+    ingest_routes._run_drive_job(job_id)
+
+    job = job_helper.get_job(db_session, job_id)
+    assert job is not None
+    assert job["status"] == "failed"
+    assert "error" in (job["error_summary"] or "").lower()

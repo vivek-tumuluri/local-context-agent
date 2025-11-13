@@ -129,16 +129,45 @@ def _upsert_row(
     return row
 
 
-def _embed_text(user_id: str, doc_id: str, text: str, content_hash: str) -> Dict[str, int]:
+def _build_drive_chunk_meta(file_meta: Dict[str, Any]) -> Dict[str, Any]:
+    doc_id = file_meta.get("id")
+    title = file_meta.get("name") or file_meta.get("title") or "(untitled)"
+    link = file_meta.get("webViewLink") or file_meta.get("webviewlink") or file_meta.get("webContentLink")
+    if not link and doc_id:
+        link = f"https://drive.google.com/file/d/{doc_id}/view"
+    return {
+        "id": doc_id,
+        "doc_id": doc_id,
+        "source": "drive",
+        "title": title,
+        "mime_type": file_meta.get("mimeType"),
+        "link": link,
+    }
+
+
+def _embed_text(
+    user_id: str,
+    doc_id: str,
+    text: str,
+    content_hash: str,
+    doc_meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, int]:
     chunks = split_by_chars(text)
-    to_upsert: List[Dict[str, Any]] = [
-        {
-            "id": f"{user_id}-{doc_id}-{i}",
-            "text": ch,
-            "meta": {"user_id": user_id, "doc_id": doc_id, "content_hash": content_hash},
-        }
-        for i, ch in enumerate(chunks)
-    ]
+    base_meta = {"user_id": user_id, "doc_id": doc_id, "content_hash": content_hash}
+    if doc_meta:
+        base_meta.update({k: v for k, v in doc_meta.items() if v is not None})
+
+    to_upsert: List[Dict[str, Any]] = []
+    for i, ch in enumerate(chunks):
+        chunk_meta = dict(base_meta)
+        chunk_meta["chunk_index"] = i
+        to_upsert.append(
+            {
+                "id": f"{user_id}-{doc_id}-{i}",
+                "text": ch,
+                "meta": chunk_meta,
+            }
+        )
     return vector.upsert(to_upsert, user_id=user_id)
 
 
@@ -170,6 +199,9 @@ def process_drive_file(
 
     parsed = parse_bytes(raw, file_meta.get("mimeType"))
     normalized = normalize_text(parsed)
+    if not normalized:
+        result["processed"] = 1
+        return result
     chash = compute_content_hash(normalized)
 
     if not force_reembed and stored and (stored.content_hash or "") == chash:
@@ -178,8 +210,14 @@ def process_drive_file(
         return result
 
     existing_ids = vector.list_doc_chunk_ids(fid, user_id=user_id)
-    summary = _embed_text(user_id, fid, normalized, chash)
+    doc_meta = _build_drive_chunk_meta(file_meta)
+    summary = _embed_text(user_id, fid, normalized, chash, doc_meta)
+    if summary.get("errors"):
+        raise RuntimeError(f"Embedding failed for document {fid}; aborting update.")
+
     new_ids = set(summary.get("ids", []))
+    if normalized and not new_ids:
+        raise RuntimeError(f"Embedding returned no chunks for document {fid}; aborting update.")
     stale_ids = [cid for cid in existing_ids if cid not in new_ids]
     if stale_ids:
         vector.delete_ids(stale_ids, user_id=user_id)
@@ -218,7 +256,7 @@ def run_drive_ingest_once(
             job.error_summary = f"list error: {e}"
             job.updated_at = datetime.now(timezone.utc)
             db.commit()
-        return {"processed": 0, "embedded": 0, "errors": 1, "nextPageToken": None}
+        raise RuntimeError(f"Drive listing failed: {e}") from e
 
     for f in files:
         processed_delta = 0

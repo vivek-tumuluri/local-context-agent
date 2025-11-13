@@ -4,7 +4,7 @@ import random
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
@@ -48,26 +48,44 @@ def _list_page_factory(svc, name_filter: Optional[str]):
         q = "trashed=false"
         if name_filter:
             q += f" and name contains '{name_filter}'"
-        req = (
-            svc.files()
-            .list(
-                q=q,
-                pageToken=page_token,
-                pageSize=page_size,
-                fields=(
-                    "nextPageToken, files(id,name,mimeType,md5Checksum,size,"
-                    "modifiedTime,trashed,version)"
-                ),
-            )
-        )
-        return req.execute()
+        retries = 0
+        while True:
+            try:
+                req = (
+                    svc.files()
+                    .list(
+                        q=q,
+                        pageToken=page_token,
+                        pageSize=page_size,
+                        fields=(
+                            "nextPageToken, files(id,name,mimeType,md5Checksum,size,"
+                            "modifiedTime,trashed,version)"
+                        ),
+                    )
+                )
+                return req.execute()
+            except HttpError as err:
+                if _should_retry(err, retries):
+                    _sleep_with_backoff(err, retries)
+                    retries += 1
+                    continue
+                raise
 
     return _list_page
 
 
 def _fetch_file_factory(svc):
     def _fetch_file(user_id: str, file_id: str, mime_type: Optional[str]) -> bytes:
-        return _download(svc, file_id, mime_type)
+        retries = 0
+        while True:
+            try:
+                return _download(svc, file_id, mime_type)
+            except HttpError as err:
+                if _should_retry(err, retries):
+                    _sleep_with_backoff(err, retries)
+                    retries += 1
+                    continue
+                raise
 
     return _fetch_file
 
@@ -96,26 +114,36 @@ def ingest_drive_endpoint(
 
     while remaining > 0:
         page_size = min(MAX_PAGE_SIZE, remaining)
-        summary = run_drive_ingest_once(
-            db=db,
-            user_id=user.user_id,
-            list_page=list_page,
-            fetch_file_bytes=fetch_file,
-            parse_bytes=_parse_bytes,
-            job=None,
-            page_token=next_page,
-            page_size=page_size,
-        )
+        try:
+            summary = run_drive_ingest_once(
+                db=db,
+                user_id=user.user_id,
+                list_page=list_page,
+                fetch_file_bytes=fetch_file,
+                parse_bytes=_parse_bytes,
+                job=None,
+                page_token=next_page,
+                page_size=page_size,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         processed += summary.get("processed", 0)
         embedded += summary.get("embedded", 0)
         errors += summary.get("errors", 0)
         remaining -= summary.get("processed", 0)
         next_page = summary.get("nextPageToken")
+        if summary.get("errors"):
+            break
         if use_cursor and not summary.get("listing_failed"):
             save_drive_cursor(db, user.user_id, next_page)
         if not next_page or summary.get("processed", 0) == 0:
             break
 
+    if errors:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Drive ingest failed after encountering {errors} error(s).",
+        )
     return {"found": processed, "ingested": embedded, "errors": errors}
 
 def _download(svc, file_id: str, mime: str | None):
@@ -176,6 +204,8 @@ def ingest_drive(
             errors += summary.get("errors", 0)
             remaining -= summary.get("processed", 0)
             page_token = summary.get("nextPageToken")
+            if summary.get("errors"):
+                break
             if use_cursor and not summary.get("listing_failed"):
                 save_drive_cursor(db, user_id, page_token)
 

@@ -75,6 +75,9 @@ def _run_ingest(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         job_helper.mark_job_running(db, job_id, total_files=0)
         result = drive_ingest.ingest_drive(**payload)
+        errors = int(result.get("errors") or 0)
+        if errors:
+            raise RuntimeError(f"Ingest completed with {errors} error(s).")
         job_helper.finish_job(db, job_id, status="succeeded", metrics=result)
         duration_ms = round((time.perf_counter() - timing_start) * 1000, 3)
         log_event(

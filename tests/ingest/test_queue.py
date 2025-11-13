@@ -75,3 +75,20 @@ def test_run_ingest_marks_failed_on_permanent_error(db_session, monkeypatch):
 
     job = job_helper.get_job(db_session, job_id)
     assert job["status"] == "failed"
+
+
+def test_run_ingest_marks_failed_when_result_has_errors(db_session, monkeypatch):
+    if ingest_queue.queue_enabled():
+        raise pytest.skip("requires queue disabled for direct call")
+    job_id = _seed_job(db_session)
+
+    def fake_ingest(**kwargs):
+        return {"found": 1, "ingested": 0, "errors": 2}
+
+    monkeypatch.setattr(ingest_queue.drive_ingest, "ingest_drive", fake_ingest)
+
+    with pytest.raises(RuntimeError):
+        ingest_queue._run_ingest(job_id, {"user_id": "user-1"})
+
+    job = job_helper.get_job(db_session, job_id)
+    assert job["status"] == "failed"
