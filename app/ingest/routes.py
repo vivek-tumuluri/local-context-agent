@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, Callable, Protocol
 import inspect
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 
@@ -16,8 +16,8 @@ except Exception:  # pragma: no cover
 from sqlalchemy.orm import Session
 
 
-from app.ingest import job_helper
-from app.auth import get_current_user
+from app.ingest import job_helper, queue as ingest_queue
+from app.auth import csrf_protect, get_current_user
 
 
 class DriveIngestCallable(Protocol):
@@ -109,9 +109,9 @@ def _bg_db_session() -> Session:
 @router.post("/drive/start")
 def start_drive_ingest(
     body: DriveStartBody,
-    bg: BackgroundTasks,
     user=Depends(get_current_user),
     db: Session = Depends(_db_dependency),
+    _csrf=Depends(csrf_protect),
 ):
     """
     Creates a new Drive ingestion job and schedules it to run in the background.
@@ -125,6 +125,15 @@ def start_drive_ingest(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(err),
             )
+
+    existing = job_helper.find_active_job(db, user.user_id)
+    if existing:
+        return {
+            "job_id": existing["job_id"],
+            "status": existing["status"],
+            "queue_job_id": None,
+            "existing": True,
+        }
 
     job_id = job_helper.create_job(
         db,
@@ -140,8 +149,22 @@ def start_drive_ingest(
         status="queued",
     )
 
-    bg.add_task(_run_drive_job, job_id)
-    return {"job_id": job_id}
+    payload = {
+        "user_id": user.user_id,
+        "name_filter": body.query,
+        "max_files": body.max_files,
+        "reembed_all": body.reembed_all,
+    }
+    response = {"job_id": job_id, "status": "queued", "queue_job_id": None, "existing": False}
+    if ingest_queue.queue_enabled():
+        rq_id = ingest_queue.enqueue_drive_job(job_id, payload=payload)
+        response["queue_job_id"] = rq_id
+        return response
+    _run_drive_job(job_id)
+    latest = job_helper.get_job(db, job_id)
+    if latest:
+        response["status"] = latest["status"]
+    return response
 
 
 @router.get("/jobs/{job_id}")

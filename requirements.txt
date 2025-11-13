@@ -11,7 +11,11 @@ chromadb
 openai
 tiktoken
 sqlalchemy
+psycopg2-binary
 pytest
 pytest-asyncio
 pytest-cov
 cryptography
+alembic
+redis
+rq

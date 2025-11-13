@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db, SessionLocal
 from ..auth import (
+    csrf_protect,
     get_current_user,
     get_google_credentials_for_user,
     get_google_credentials_for_user_unmanaged,
@@ -81,6 +82,7 @@ def ingest_drive_endpoint(
     name_contains: str | None = Query(None),
     user=Depends(get_current_user),
     db: Session = Depends(get_db),
+    _csrf=Depends(csrf_protect),
 ):
     creds = get_google_credentials_for_user(db, user.user_id)
     svc = _drive_service(creds)

@@ -31,7 +31,6 @@ from app.main import app as fastapi_app
 from app.models import Base, User
 from app.ingest import routes as ingest_routes
 from app.ingest import drive_ingest
-from app.routes import ingest_drive as legacy_drive
 from app.routes import jobs as jobs_routes
 from app.rag import vector as vector_module
 from app.rag import routes as rag_routes
@@ -82,7 +81,6 @@ def session_factory(monkeypatch, tmp_path) -> Generator[sessionmaker, None, None
         auth_module,
         ingest_routes,
         drive_ingest,
-        legacy_drive,
         jobs_routes,
     ]
     for mod in modules:

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from openai import OpenAI
 
-from app.auth import get_current_user
+from app.auth import csrf_protect, get_current_user
 from app.rag.vector import query as vec_query
 
 router = APIRouter(prefix="/rag", tags=["rag"])
@@ -169,7 +169,11 @@ def _answer_prompt(context: str, question: str, allow_partial: bool) -> str:
 
 
 @router.post("/search")
-def rag_search(body: SearchRequest, user=Depends(get_current_user)):
+def rag_search(
+    body: SearchRequest,
+    user=Depends(get_current_user),
+    _csrf=Depends(csrf_protect),
+):
 
     hits = vec_query(body.query, k=body.k, user_id=user.user_id)
     hits = _filter_hits(hits, body.source)
@@ -182,7 +186,11 @@ def rag_search(body: SearchRequest, user=Depends(get_current_user)):
 
 
 @router.post("/answer")
-def rag_answer(body: AnswerRequest, user=Depends(get_current_user)):
+def rag_answer(
+    body: AnswerRequest,
+    user=Depends(get_current_user),
+    _csrf=Depends(csrf_protect),
+):
     _require_openai()
 
 

@@ -17,10 +17,54 @@ async def test_start_drive_ingest_creates_job(api_client, db_session, monkeypatc
 
     resp = await api_client.post("/ingest/drive/start", json={"max_files": 2, "reembed_all": False})
     assert resp.status_code == 200, resp.text
-    job_id = resp.json()["job_id"]
+    body = resp.json()
+    assert body["existing"] is False
+    job_id = body["job_id"]
     job = job_helper.get_job(db_session, job_id)
     assert job and job["status"] == "queued"
-    assert ran["called"] is True
+    if body.get("queue_job_id"):
+        assert ran["called"] is False
+    else:
+        assert ran["called"] is True
+
+
+@pytest.mark.asyncio
+async def test_start_drive_ingest_enqueues_when_queue_enabled(api_client, monkeypatch, test_user):
+    monkeypatch.setattr(ingest_routes, "ENSURE_DRIVE_SESSION", lambda user_id: None)
+    fake_rq_id = "rq-123"
+    seen = {}
+
+    def fake_enqueue(job_id: str, payload: dict):
+        seen["job_id"] = job_id
+        seen["payload"] = payload
+        return fake_rq_id
+
+    monkeypatch.setattr(ingest_routes.ingest_queue, "queue_enabled", lambda: True)
+    monkeypatch.setattr(ingest_routes.ingest_queue, "enqueue_drive_job", fake_enqueue)
+
+    resp = await api_client.post("/ingest/drive/start", json={"max_files": 1})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["queue_job_id"] == fake_rq_id
+    assert body["existing"] is False
+    assert seen["payload"]["user_id"] == test_user.id
+    assert seen["payload"]["max_files"] == 1
+
+
+@pytest.mark.asyncio
+async def test_start_drive_ingest_returns_existing_job(api_client, db_session, test_user, monkeypatch):
+    monkeypatch.setattr(ingest_routes, "ENSURE_DRIVE_SESSION", lambda user_id: None)
+    job_id = job_helper.create_job(
+        db_session,
+        user_id=test_user.id,
+        payload={"user_id": test_user.id},
+        status="running",
+    )
+    resp = await api_client.post("/ingest/drive/start", json={})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["existing"] is True
+    assert body["job_id"] == job_id
 
 
 @pytest.mark.asyncio

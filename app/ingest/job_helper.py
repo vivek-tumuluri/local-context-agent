@@ -18,6 +18,7 @@ def utcnow() -> datetime:
 ALLOWED_STATUSES: Sequence[str] = (
     "queued", "running", "succeeded", "failed", "partial"
 )
+ACTIVE_STATUSES: Sequence[str] = ("queued", "running")
 
 def _validate_status(status: str) -> None:
     if status not in ALLOWED_STATUSES:
@@ -63,7 +64,7 @@ def _append_log_to_job(job: IngestionJob, message: str) -> None:
         logs = []
     logs.append(entry)
     metrics["logs"] = logs
-    _set_if_attr(job, "metrics", metrics)
+    _set_if_attr(job, "metrics", dict(metrics))
 
 def _job_pk(job: IngestionJob) -> str:
     """
@@ -120,6 +121,18 @@ def create_job(
 
 
     return _job_pk(job)
+
+
+def find_active_job(db: Session, user_id: str) -> Optional[Dict[str, Any]]:
+    q = (
+        db.query(IngestionJob)
+        .filter(IngestionJob.user_id == user_id, IngestionJob.status.in_(ACTIVE_STATUSES))  # type: ignore[attr-defined]
+        .order_by(IngestionJob.created_at.desc())  # type: ignore[attr-defined]
+    )
+    row = q.first()
+    if not row:
+        return None
+    return get_job(db, _job_pk(row))
 
 def get_job(db: Session, job_id: str) -> Optional[Dict[str, Any]]:
     job = db.get(IngestionJob, job_id)
@@ -207,6 +220,21 @@ def append_job_log(db: Session, job_id: str, message: str) -> None:
     _set_if_attr(job, "updated_at", utcnow())
     db.commit()
 
+
+def record_job_error(db: Session, job_id: str, message: str) -> None:
+    job = db.get(IngestionJob, job_id)
+    if not job:
+        raise ValueError(f"IngestionJob {job_id} not found")
+    metrics = _get_or_default(job, "metrics", None)
+    if metrics is None or not isinstance(metrics, dict):
+        metrics = {}
+    errors = int(metrics.get("errors") or 0)
+    metrics["errors"] = errors + 1
+    _set_if_attr(job, "metrics", dict(metrics))
+    _append_log_to_job(job, message)
+    _set_if_attr(job, "updated_at", utcnow())
+    db.commit()
+
 def finish_job(
     db: Session,
     job_id: str,
@@ -226,9 +254,9 @@ def finish_job(
         existing = _get_or_default(job, "metrics", None)
         if not isinstance(existing, dict):
             existing = {}
-
-        existing.update(metrics)
-        _set_if_attr(job, "metrics", existing)
+        merged = dict(existing)
+        merged.update(metrics)
+        _set_if_attr(job, "metrics", merged)
 
     _set_if_attr(job, "updated_at", utcnow())
     if hasattr(job, "finished_at"):

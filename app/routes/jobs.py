@@ -4,13 +4,17 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import IngestionJob
-from app.auth import get_current_user
+from app.auth import csrf_protect, get_current_user
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 @router.post("/ingest")
-def start_ingest(user=Depends(get_current_user), db: Session = Depends(get_db)):
+def start_ingest(
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _csrf=Depends(csrf_protect),
+):
     """
     Create a new ingestion job row (queued) and return its ID.
     """

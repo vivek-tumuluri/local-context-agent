@@ -1,11 +1,12 @@
 import hashlib
+import hmac
 import json
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
@@ -14,8 +15,16 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal, get_db
-from app.models import DriveSession, User, UserSession
+from app.models import (
+    ContentIndex,
+    DriveSession,
+    IngestionJob,
+    SourceState,
+    User,
+    UserSession,
+)
 from .google_clients import build_flow
+from app.rag import vector
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -40,6 +49,8 @@ SESSION_COOKIE_SAMESITE = os.getenv(
     "SESSION_COOKIE_SAMESITE",
     "lax" if APP_ENV == "development" else "strict",
 )
+CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "lc_csrf")
+CSRF_HEADER_NAME = os.getenv("CSRF_HEADER_NAME", "X-CSRF-Token")
 STATE_SIGNER = URLSafeSerializer(SESSION_SECRET, salt="oauth-state")
 
 DRIVE_CREDENTIALS_KEY = os.getenv("DRIVE_CREDENTIALS_KEY")
@@ -112,6 +123,31 @@ def _set_session_cookie(response: RedirectResponse, token: str) -> None:
     )
 
 
+def _new_csrf_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _set_csrf_cookie(response: Response, token: str) -> None:
+    max_age = SESSION_TTL_DAYS * 24 * 60 * 60
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=token,
+        max_age=max_age,
+        httponly=False,
+        secure=SESSION_COOKIE_SECURE,
+        samesite=SESSION_COOKIE_SAMESITE,
+    )
+
+
+def ensure_csrf_cookie(request: Request, response: Response) -> str:
+    token = request.cookies.get(CSRF_COOKIE_NAME)
+    if token:
+        return token
+    token = _new_csrf_token()
+    _set_csrf_cookie(response, token)
+    return token
+
+
 def _fetch_profile(creds: Credentials) -> Dict[str, Any]:
     svc = build("oauth2", "v2", credentials=creds)
     return svc.userinfo().get().execute()
@@ -173,9 +209,26 @@ def _extract_session_token(request: Request) -> Optional[str]:
     header_token = None
     if authz.lower().startswith("bearer "):
         header_token = authz.split(" ", 1)[1].strip()
-    alt_header = request.headers.get("X-Session")
+    return cookie or header_token
 
-    return cookie or header_token or alt_header
+
+def csrf_protect(request: Request) -> None:
+    """
+    Double-submit protection: compare readable CSRF cookie to supplied header.
+    Only enforced when the session is supplied via cookie (Bearer flows are exempt).
+    """
+    if SESSION_COOKIE_NAME not in request.cookies:
+        return
+    cookie_token = request.cookies.get(CSRF_COOKIE_NAME)
+    header_token = (
+        request.headers.get(CSRF_HEADER_NAME)
+        or request.headers.get("X-CSRFToken")
+        or request.headers.get("X-Csrf-Token")
+    )
+    if not cookie_token or not header_token:
+        raise HTTPException(status_code=403, detail="Missing CSRF token")
+    if not hmac.compare_digest(cookie_token, header_token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
 
 def _load_session(db: Session, token: str) -> UserSession:
@@ -204,6 +257,52 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
 
 class _MissingCredentials(RuntimeError):
     pass
+
+
+def _delete_user_data(db: Session, user_id: str) -> Dict[str, int]:
+    summary = {
+        "content_index": 0,
+        "source_state": 0,
+        "drive_sessions": 0,
+        "ingestion_jobs": 0,
+        "user_sessions": 0,
+    }
+    summary["content_index"] = (
+        db.query(ContentIndex).filter(ContentIndex.user_id == user_id).delete(synchronize_session=False)
+    )
+    summary["source_state"] = (
+        db.query(SourceState).filter(SourceState.user_id == user_id).delete(synchronize_session=False)
+    )
+    summary["drive_sessions"] = (
+        db.query(DriveSession).filter(DriveSession.user_id == user_id).delete(synchronize_session=False)
+    )
+    summary["ingestion_jobs"] = (
+        db.query(IngestionJob).filter(IngestionJob.user_id == user_id).delete(synchronize_session=False)
+    )
+    summary["user_sessions"] = (
+        db.query(UserSession).filter(UserSession.user_id == user_id).delete(synchronize_session=False)
+    )
+    db.commit()
+    try:
+        vector.reset_collection(user_id=user_id)
+    except Exception:
+        pass
+    return summary
+
+
+def _clear_session_state(response: Response) -> None:
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=SESSION_COOKIE_SECURE,
+        samesite=SESSION_COOKIE_SAMESITE,
+    )
+    response.delete_cookie(
+        key=CSRF_COOKIE_NAME,
+        httponly=False,
+        secure=SESSION_COOKIE_SECURE,
+        samesite=SESSION_COOKIE_SAMESITE,
+    )
 
 
 def _build_credentials(data: Dict[str, Any]) -> Credentials:
@@ -290,16 +389,45 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
 
     response = RedirectResponse(url=f"/auth/me", status_code=303)
     _set_session_cookie(response, session_token)
+    _set_csrf_cookie(response, _new_csrf_token())
     return response
 
 
 @router.get("/me")
-def me(user: User = Depends(get_current_user)):
+def me(
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+):
+    csrf_token = ensure_csrf_cookie(request, response)
     return {
         "user": {
             "id": user.id,
             "email": user.email,
             "full_name": user.full_name,
             "picture": user.picture,
-        }
+        },
+        "csrf_token": csrf_token,
     }
+
+
+@router.get("/csrf")
+def csrf_token(
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+):
+    token = ensure_csrf_cookie(request, response)
+    return {"csrf_token": token}
+
+
+@router.post("/disconnect")
+def disconnect(
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _csrf=Depends(csrf_protect),
+):
+    summary = _delete_user_data(db, user.id)
+    _clear_session_state(response)
+    return {"status": "ok", "deleted": summary}
