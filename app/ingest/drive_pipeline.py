@@ -17,7 +17,7 @@ from app.metrics import StageTimer
 DRIVE_SOURCE = "drive"
 PROGRESS_FLUSH_INTERVAL = max(1, int(os.getenv("INGEST_PROGRESS_FLUSH_INTERVAL", "10")))
 EMBED_BATCH_SIZE = max(1, int(os.getenv("EMBED_BATCH_SIZE", "48")))
-EMBED_TOKEN_LIMIT = max(2000, int(os.getenv("EMBED_TOKEN_LIMIT", "6000")))
+EMBED_TOKEN_LIMIT = max(1000, int(os.getenv("EMBED_TOKEN_LIMIT", "120000")))
 
 
 class EmbeddingBatchError(RuntimeError):
@@ -54,6 +54,8 @@ class EmbeddingBatcher:
         if work.doc_id in self._doc_states:
             raise RuntimeError(f"Duplicate doc_id registered in batcher: {work.doc_id}")
         self._doc_states[work.doc_id] = {"work": work, "inserted": 0}
+        work.embedded_count = len(work.chunks)
+        ready: List[DocWork] = []
         for chunk in work.chunks:
             text = (chunk.get("text") or "").strip()
             if not text:
@@ -61,8 +63,8 @@ class EmbeddingBatcher:
             chunk["text"] = text[: vector.MAX_CHARS_PER_CHUNK]
             self._pending.append((work, chunk))
             self._pending_tokens += self._estimate_tokens(chunk["text"])
-        work.embedded_count = len(work.chunks)
-        return self._maybe_flush()
+            ready.extend(self._maybe_flush())
+        return ready
 
     def flush(self, force: bool = False) -> List[DocWork]:
         if not force:

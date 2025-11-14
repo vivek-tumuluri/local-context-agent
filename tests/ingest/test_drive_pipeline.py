@@ -275,6 +275,41 @@ def test_embedding_batcher_batches_multiple_docs(db_session, fake_vector_env, te
     assert any("Doc Two" in text for text in combined_input)
 
 
+def test_embedding_batcher_splits_large_doc_when_token_limit_hit(db_session, fake_vector_env, test_user):
+    doc_id = "doc-big"
+    base_meta = {"user_id": test_user.id, "doc_id": doc_id, "content_hash": "hash"}
+    chunk_rows = []
+    for idx in range(40):
+        chunk_rows.append(
+            {
+                "id": f"{test_user.id}-{doc_id}-{idx}",
+                "text": ("segment-%02d " % idx) * 100,
+                "meta": {**base_meta, "chunk_index": idx},
+            }
+        )
+
+    work = drive_pipeline.DocWork(
+        doc_id=doc_id,
+        user_id=test_user.id,
+        chunks=chunk_rows,
+        existing_chunk_ids=[],
+        file_meta=_make_file(doc_id, version="1", modifiedTime=None),
+        content_hash="hash",
+        embedded_count=len(chunk_rows),
+    )
+
+    batcher = drive_pipeline.EmbeddingBatcher(test_user.id, max_batch_size=100, max_tokens=50)
+    ready = batcher.enqueue_doc(work)
+    drive_pipeline._finalize_ready_docs(db_session, test_user.id, ready)
+    ready = batcher.flush(force=True)
+    drive_pipeline._finalize_ready_docs(db_session, test_user.id, ready)
+
+    _, embeddings = fake_vector_env
+    assert len(embeddings.calls) > 1, "expected large doc to be split across multiple embedding calls"
+    chunk_ids = vector_module.list_doc_chunk_ids(doc_id, user_id=test_user.id)
+    assert len(chunk_ids) == len(chunk_rows)
+
+
 def test_stale_chunks_removed_after_doc_complete(monkeypatch, db_session, fake_vector_env, test_user):
     first = " ".join(["chunk"] * 2000)
     summary = drive_pipeline.process_drive_file(
