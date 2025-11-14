@@ -1,38 +1,75 @@
 # Local Context Agent
 
-A FastAPI application that authenticates with Google on behalf of a user, ingests Drive files and Calendar events, and serves retrieval-augmented answers backed by Chroma + OpenAI embeddings. The goal is to provide a minimal but production-minded reference you can extend with your own auth, worker, or LLM stack.
+FastAPI app + RQ worker that authenticates to Google on behalf of a user, ingests Drive + Calendar data, stores normalized metadata in SQL + per-user Chroma collections, and exposes retrieval/search/answering endpoints backed by OpenAI embeddings. The current iteration focuses on production-minded ingest: throttled job progress logging, transactional page-level commits, and token-aware embedding batching so large documents no longer crash the pipeline.
 
-## What You Get
-- **Hardened auth** – `/auth` completes the Google OAuth flow, stores refresh + access tokens in SQL (`users`, `user_sessions`, `drive_sessions`), and exposes only HttpOnly cookies / bearer tokens to clients.
-- **Unified ingestion pipeline** – Drive and Calendar routes normalize text, hash deduped content, update `ContentIndex`, and upsert embeddings into per-user Chroma collections. Quick runs, background jobs, and legacy wrappers all call the same code paths.
-- **Job orchestration** – `/ingest/drive/start` creates `IngestionJob` rows, runs ingest work in the background, and surfaces progress/logs via `/ingest/jobs/*`.
-- **RAG endpoints** – `/rag/search` returns ranked chunks with confidence scores; `/rag/answer` uses OpenAI Chat with inline citations.
-- **Test coverage** – Pytest suite exercises auth/session helpers, text normalization, chunking, and re-ingest logic so refactors stay safe.
+---
 
-## Architecture at a Glance
+## Highlights
+
+**Battle-tested auth/session stack**  
+`app/auth.py` handles Google OAuth, stores refresh/access tokens plus Drive session scopes in SQL, issues signed HttpOnly session cookies, and exposes simple helpers (`get_current_user`, `csrf_protect`) used across every route.
+
+**Unified Drive pipeline**  
+`app/ingest/drive_pipeline.py` contains the canonical “normalize → dedupe → chunk → embed → persist” flow. Every entrypoint (`/ingest/drive`, `/ingest/drive/start`, legacy scripts, worker jobs) funnels through this module so bug fixes land everywhere.
+
+**EmbeddingBatcher**  
+A token-aware batching layer slices chunk uploads across multiple OpenAI requests. It monitors cumulative tokens + chunk counts per batch, flushes automatically inside `enqueue_doc`, and only deletes stale chunks after a document’s entire chunk set is safely upserted. Oversized docs no longer blow the 300k tokens/request limit.
+
+**Throttled job progress**  
+Both inline and RQ workers buffer progress/log updates and commit Drive ingest work per Drive page. That cuts database spam and keeps job metrics consistent even on massive runs.
+
+**RAG-ready APIs**  
+`/rag/search` returns ranked chunks with confidence scores, while `/rag/answer` feeds those chunks into OpenAI Chat, streaming answers with inline citations.
+
+**Solid test bed**  
+Pytest suite includes fake Google clients, fake OpenAI embeddings, golden Drive docs, and coverage for chunking, re-ingest, token batching, and worker progress throttling. Network calls are blocked by default so tests are deterministic.
+
+---
+
+## Repository Layout
+
 ```
-FastAPI (app/main.py)
-├── Auth: app/auth.py + app/google_clients.py
-├── Ingestion
-│   ├── app/ingest/drive_ingest.py   (Google adapters + unified pipeline entrypoints)
-│   ├── app/ingest/calendar_ingest.py
-│   ├── app/ingest/drive_pipeline.py (normalize → dedupe → embed → persist)
-│   ├── app/ingest/routes.py         (`/ingest/drive/start`, job helpers)
-│   └── app/routes/ingest_drive.py   (legacy scripting route; not production ready)
-├── Retrieval: app/rag/routes.py + app/rag/vector.py + app/rag/chunk.py
-├── Persistence: app/models.py + app/db.py + scripts/create_tables.py
-└── Jobs API: app/routes/jobs.py
+app/
+├── main.py              # FastAPI bootstrap + dependency overrides
+├── auth.py              # Google OAuth, sessions, CSRF
+├── ingest/
+│   ├── routes.py        # /ingest/drive/start, job polling, inline runner
+│   ├── drive_ingest.py  # Google SDK adapters + legacy synchronous route
+│   ├── drive_pipeline.py# normalize/dedupe/embed pipeline + EmbeddingBatcher
+│   ├── calendar_ingest.py
+│   └── queue.py         # RQ entrypoint (_run_ingest) + enqueue helpers
+├── rag/
+│   ├── routes.py        # /rag/search, /rag/answer
+│   └── vector.py        # Chroma helpers, OpenAI embeddings client
+├── models.py            # SQLAlchemy models for users, sessions, jobs, content
+├── db.py                # Session factory + engine bootstrap
+└── routes/jobs.py       # Admin endpoints for job listings
+scripts/
+├── create_tables.py     # Bootstraps DB schema (sqlite by default)
+└── worker.py            # RQ worker entrypoint
+tests/
+├── ingest/...           # Drive pipeline + routes tests
+└── fakes.py             # Fake OpenAI, Chroma, etc.
 ```
+
+---
 
 ## Prerequisites
-- Python 3.10+
-- SQLite (default) or any SQL database supported by SQLAlchemy
-- Google Cloud OAuth credentials with Drive + Calendar read scopes
-- OpenAI API key (embeddings + answers)
-- Local filesystem access for the Chroma store (default `./.chroma`)
+
+* Python 3.10+
+* SQLite (default) or any SQLAlchemy-compatible DB
+* Google Cloud OAuth credentials with Drive + Calendar read scopes
+* OpenAI API key (embeddings + chat)
+* Redis (cloud Upstash URL or local redis-server) for RQ jobs
+* Local filesystem access for Chroma (default `.chroma/`)
+
+---
 
 ## Setup
+
 ```bash
+git clone https://github.com/your-org/local-context-agent.git
+cd local-context-agent
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
@@ -40,71 +77,192 @@ pip install -r requirements.txt
 python -m scripts.create_tables
 ```
 
-## Configuration
-Put secrets in `.env` (never commit it). Key variables:
+Create `.env` (never commit) with:
 
-| Variable | Description |
+| Var | Description |
 | --- | --- |
-| `DATABASE_URL` | SQLAlchemy URL; defaults to `sqlite:///./local_context.db`. |
-| `SESSION_SECRET` | Used to sign session payloads and OAuth state. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials from Google Cloud. |
-| `OAUTH_REDIRECT_URI` | Must match the authorized redirect (e.g. `http://localhost:8000/auth/google/callback`). |
-| `OPENAI_API_KEY` | Used for embeddings + Chat completions. |
-| `COLLECTION_PREFIX`, `CHROMA_DIR`, `EMBED_MODEL`, etc. | Optional tunables for vector storage. |
+| `DATABASE_URL` | e.g. `sqlite:///./local_context.db` |
+| `SESSION_SECRET` | long random string |
+| `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` | from Google Cloud |
+| `OAUTH_REDIRECT_URI` | e.g. `http://localhost:8000/auth/google/callback` |
+| `OPENAI_API_KEY` | Embeddings + answer generation |
+| `REDIS_URL` | `redis://localhost:6379/0` or Upstash `rediss://` URL |
+| `CHROMA_DIR`, `COLLECTION_PREFIX`, `EMBED_MODEL` | optional overrides |
+| `INGEST_PROGRESS_FLUSH_INTERVAL` | how often job progress is flushed (default 10) |
+| `EMBED_BATCH_SIZE`, `EMBED_TOKEN_LIMIT` | embedding batch knobs (default 48 chunks / 120k tokens) |
 
-Load the env file automatically via `python-dotenv` (already called in `app/main.py`).
+The app autoloads `.env` via `python-dotenv`.
 
-## Running the App
+---
+
+## Running Everything
+
+Open 3 terminals (all from repo root, with `.venv` activated):
+
+1. **API**
+   ```bash
+   source .venv/bin/activate
+   set -a; source .env; set +a
+   uvicorn app.main:app --reload
+   # Swagger: http://localhost:8000/docs
+   ```
+
+2. **Worker**
+   ```bash
+   source .venv/bin/activate
+   set -a; source .env; set +a
+   export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES  # macOS fork guard
+   python -m scripts.worker
+   ```
+
+3. **Client (curl / httpie)**
+   ```bash
+   source .venv/bin/activate
+   set -a; source .env; set +a
+   export BASE_URL="http://127.0.0.1:8000"
+   ```
+
+---
+
+## Auth & Session Flow
+
+1. `GET /auth/google` → returns `{authorization_url}`.
+2. Visit the URL, consent with Drive + Calendar scopes.
+3. `/auth/google/callback` persists tokens, upserts your user, issues an HttpOnly `lc_session` cookie plus bearer token (available at `/auth/debug/authed` during dev).
+4. Use `GET /auth/me` to verify the session. Every other route depends on `get_current_user` and `csrf_protect`.
+
+---
+
+## Ingestion Workflows
+
+### Sync Drive ingest (small batches)
 ```bash
-uvicorn app.main:app --reload
-# Docs: http://localhost:8000/docs
+curl -X POST "$BASE_URL/ingest/drive" \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: $CSRF" \
+  --cookie "$COOKIES" \
+  -d '{"limit":20}'
 ```
 
-## Auth Flow
-1. `GET /auth/google` → returns an `authorization_url`.
-2. Complete the Google consent screen.
-3. `/auth/google/callback` exchanges the code, persists tokens, creates/updates the user record, and redirects to `/auth/debug/authed` showing your bearer token (also stored as an HttpOnly cookie `lc_session`).
-4. Use `/auth/me` to confirm the session. All other routes depend on `get_current_user`, so requests without the cookie or `Authorization: Bearer <token>` are rejected.
+### Background Drive ingest
+```bash
+curl -X POST "$BASE_URL/ingest/drive/start" \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: $CSRF" \
+  --cookie "$COOKIES" \
+  -d '{"query":"","max_files":100,"reembed_all":false}' \
+  | tee /tmp/ingest_start.json
+export JOB_ID=$(jq -r '.job_id' /tmp/ingest_start.json)
+curl "$BASE_URL/ingest/jobs/$JOB_ID" \
+  -H "X-CSRF-Token: $CSRF" \
+  --cookie "$COOKIES" \
+  | jq .
+```
 
-## Drive Ingestion
-| Endpoint | Best for | Notes |
-| --- | --- | --- |
-| `POST /ingest/drive` | Quick, synchronous runs (≤50 files). | Returns `{found, ingested_chunks, errors}` immediately. |
-| `POST /ingest/drive/start` | Production workloads. | Creates an `IngestionJob`, runs in the background, poll `/ingest/jobs/{id}` for progress/logs. |
-| `POST /ingest/drive/run` | Legacy scripting helper. | Currently not production-ready; prefer the routes above. |
+Behind the scenes:
 
-Under the hood all three call `drive_pipeline.process_drive_file`, which:
-- Lists Drive files via Google SDK
-- Downloads/exports (Docs/Sheets/Slides → text/CSV)
-- Parses bytes (`app/ingest/parser.py`), normalizes text (`text_normalize.py`)
-- Computes content hashes + `should_reingest` decision
-- Updates `ContentIndex` and deletes/recreates embeddings in Chroma
+1. `routes.py` creates an `IngestionJob` row, enqueues work via RQ (`queue.enqueue_drive_job`) if Redis is configured, or runs inline fallback.
+2. Worker executes `_run_ingest`, loads Google Drive credentials, and calls `drive_ingest.ingest_drive`.
+3. `drive_pipeline.run_drive_ingest_once` processes Drive pages, buffering chunk uploads per doc via `EmbeddingBatcher`.
+4. `_finalize_ready_docs` deletes stale chunk IDs only after new chunks are safely embedded and persisted.
+5. Job progress/log updates are throttled and flushed every `INGEST_PROGRESS_FLUSH_INTERVAL` files plus a forced flush at the end.
 
-## Calendar Ingestion
-`POST /ingest/calendar` pulls events for the next `months` (default 6), formats them as text blocks, and pushes them through the same chunk/embedding pipeline so `/rag` queries can surface calendar context alongside Drive docs.
+### Calendar ingest
+```bash
+curl -X POST "$BASE_URL/ingest/calendar" \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: $CSRF" \
+  --cookie "$COOKIES" \
+  -d '{"months":3}'
+```
 
-## Retrieval APIs
-- `POST /rag/search` → `{ query, k, source? }` → ranked chunks with confidence scores.
-- `POST /rag/answer` → `{ query, k, max_ctx_chars, allow_partial }` → OpenAI-powered answer with `[n]` citations and aggregate confidence.
+---
 
-Both endpoints embed the query via OpenAI, query the user’s Chroma collection, and rely on `app/rag/chunk.py` for context formatting.
+## Retrieval (RAG)
 
-## Data Stores
-- **SQL (default SQLite)** – tracks users, sessions, job state, content metadata. Managed via SQLAlchemy models in `app/models.py`. Run `python -m scripts.create_tables` anytime you bootstrap a new environment.
-- **Chroma** – persistent vector store under `.chroma/` (configurable). Safe to wipe in dev; rerun ingestion to rebuild.
+```bash
+# search chunks
+curl -X POST "$BASE_URL/rag/search" \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: $CSRF" \
+  --cookie "$COOKIES" \
+  -d '{"query":"montreal itinerary","k":6}' \
+  | jq .
+
+# answer with citations
+curl -X POST "$BASE_URL/rag/answer" \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: $CSRF" \
+  --cookie "$COOKIES" \
+  -d '{"query":"montreal itinerary","k":6,"max_ctx_chars":4000}' \
+  | jq .
+```
+
+Both endpoints embed the query, query the user’s Chroma collection, and (for `/rag/answer`) send selected chunks to OpenAI Chat with inline `[n]` citations that match the chunk metadata.
+
+---
+
+## Worker & Queue Tips
+
+* **Clearing the queue** (pending + failed):
+  ```bash
+  source .venv/bin/activate
+  set -a; source .env; set +a
+  python - <<'PY'
+  import os
+  from redis import from_url
+  from rq import Queue
+  from rq.registry import FailedJobRegistry
+
+  conn = from_url(os.environ["REDIS_URL"])
+  q = Queue("ingest", connection=conn)
+  q.empty()
+  failed = FailedJobRegistry(queue=q)
+  for job_id in failed.get_job_ids():
+      failed.remove(job_id, delete_job=True)
+  print("Queue and failed registry cleared.")
+  PY
+  ```
+
+* **Retry behavior** – RQ automatically retries transient failures (`RETRY_POLICY` in `queue.py`). Token-limit errors count as permanent; batching fixes should prevent them.
+
+* **Telemetry** – `app/logging_utils.log_event` emits structured JSON logs for every stage (drive_list_page, drive_process_file, job start/completion). These logs include `duration_ms`, doc IDs, and user IDs; pipe them into your preferred log aggregator in prod.
+
+---
 
 ## Testing
+
 ```bash
 source .venv/bin/activate
-pytest -q
+pytest tests/ingest/test_drive_ingest.py
+pytest tests/ingest/test_drive_pipeline.py -k drive
+pytest -q                     # entire suite
+pytest -q -m "not perf"       # skip optional perf benchmarks
 ```
-The suite runs deterministically with network access disabled by default (set `ALLOW_NETWORK=1` to opt in). It enforces coverage on `app/` via `pytest.ini`, provides @perf markers for optional synthetic benchmarks, and includes golden retrieval datasets plus in-memory fakes for OpenAI, Google APIs, and Chroma. Use `pytest -q -k "not perf"` in CI for the fast path.
 
-## Roadmap Ideas
-- Swap FastAPI background tasks for a real worker (Celery/RQ) to handle long-running jobs and retries.
-- Add observability (structured logs, metrics, tracing) around ingest + RAG usage.
-- Plug in additional sources (Notion, Slack, email) by following the same normalize → dedupe → chunk → embed pattern.
-- Replace or extend OpenAI usage with your preferred embedding/LLM provider.
+* Network access is blocked unless you set `ALLOW_NETWORK=1`.
+* Fake clients simulate Google Drive, OpenAI embeddings, and Chroma so tests run fast.
+* New tests include embedding batch split coverage and worker throttling assertions.
+
+---
+
+## Operational Notes
+
+* **Large docs** – With batching enabled, even multi-MB Drive docs should finish; they just span multiple embedding calls. Stale chunks are deleted only after the doc’s entire chunk set succeeds.
+* **Unsupported formats** – Binary-only files (images, raw videos) fail gracefully: `process_drive_file` returns `processed=1, embedded=0`, leaving existing chunks untouched.
+* **Deleting data** – `POST /auth/disconnect` deletes Chroma entries (`content_index` rows), source state, Drive sessions, ingestion jobs, and user sessions for the current user.
+
+---
+
+## Roadmap
+
+* Prune obvious non-text MIME types during Drive listing to avoid wasted downloads.
+* Surface ingest metrics in `/jobs` (batch counts, token totals).
+* Add Notion/Slack/email sources by reusing the DocWork + EmbeddingBatcher pattern.
+* Swap OpenAI embeddings for an open-source model or Azure-hosted variant.
+
+---
 
 ## License
-MIT.
+
+MIT License. Use at your own risk; contributions welcome. Pull requests should include tests for new ingest behaviors (especially around batching, job progress, and RAG responses).
