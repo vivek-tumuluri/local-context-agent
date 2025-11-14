@@ -77,7 +77,21 @@ def _run_ingest(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         result = drive_ingest.ingest_drive(**payload)
         errors = int(result.get("errors") or 0)
         if errors:
-            raise RuntimeError(f"Ingest completed with {errors} error(s).")
+            summary = f"Ingest completed with {errors} error(s)."
+            job_helper.finish_job(db, job_id, status="failed", error_summary=summary, metrics=result)
+            duration_ms = round((time.perf_counter() - timing_start) * 1000, 3)
+            log_event(
+                "ingest_job_completed",
+                job_id=job_id,
+                user_id=user_id,
+                status="failed",
+                duration_ms=duration_ms,
+                attempt=attempt_ctx.get("attempt"),
+                max_attempts=attempt_ctx.get("max_attempts"),
+                rq_job_id=attempt_ctx.get("rq_job_id"),
+                metrics=result,
+            )
+            return result
         job_helper.finish_job(db, job_id, status="succeeded", metrics=result)
         duration_ms = round((time.perf_counter() - timing_start) * 1000, 3)
         log_event(

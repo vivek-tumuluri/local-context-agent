@@ -9,6 +9,8 @@ from app.ingest.text_normalize import normalize_text, compute_content_hash
 from app.ingest.should_ingest import should_reingest
 from app.ingest.chunking import split_by_chars
 from app.rag import vector
+from app.logging_utils import log_event
+from app.metrics import StageTimer
 
 DRIVE_SOURCE = "drive"
 
@@ -244,7 +246,8 @@ def run_drive_ingest_once(
     listing_failed = False
 
     try:
-        listing = list_page(user_id=user_id, page_token=page_token, page_size=page_size)
+        with StageTimer("drive_list_page", user_id=user_id):
+            listing = list_page(user_id=user_id, page_token=page_token, page_size=page_size)
         files: List[Dict[str, Any]] = list(listing.get("files", []) or [])
         next_token = listing.get("nextPageToken")
         if job:
@@ -261,19 +264,36 @@ def run_drive_ingest_once(
     for f in files:
         processed_delta = 0
         try:
-            summary = process_drive_file(
-                db,
-                user_id=user_id,
-                file_meta=f,
-                fetch_file_bytes=fetch_file_bytes,
-                parse_bytes=parse_bytes,
-                force_reembed=force_reembed,
-            )
+            with StageTimer("drive_process_file", user_id=user_id, doc_id=f.get("id")):
+                summary = process_drive_file(
+                    db,
+                    user_id=user_id,
+                    file_meta=f,
+                    fetch_file_bytes=fetch_file_bytes,
+                    parse_bytes=parse_bytes,
+                    force_reembed=force_reembed,
+                )
             processed_delta = summary.get("processed", 0)
             processed += processed_delta
             embedded += summary.get("embedded", 0)
-        except Exception:
+        except Exception as exc:
             errors += 1
+            log_event(
+                "drive_file_error",
+                user_id=user_id,
+                doc_id=f.get("id"),
+                name=f.get("name"),
+                error=str(exc),
+            )
+            if job:
+                metrics = dict(job.metrics or {})
+                failed_docs = list(metrics.get("failed_docs") or [])
+                if len(failed_docs) < 25:
+                    failed_docs.append({"doc_id": f.get("id"), "name": f.get("name"), "error": str(exc)})
+                metrics["failed_docs"] = failed_docs
+                job.metrics = metrics
+                job.updated_at = datetime.now(timezone.utc)
+                db.commit()
 
         if job:
             inc = processed_delta or 1

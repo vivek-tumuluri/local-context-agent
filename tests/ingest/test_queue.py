@@ -87,8 +87,7 @@ def test_run_ingest_marks_failed_when_result_has_errors(db_session, monkeypatch)
 
     monkeypatch.setattr(ingest_queue.drive_ingest, "ingest_drive", fake_ingest)
 
-    with pytest.raises(RuntimeError):
-        ingest_queue._run_ingest(job_id, {"user_id": "user-1"})
+    ingest_queue._run_ingest(job_id, {"user_id": "user-1"})
 
     job = job_helper.get_job(db_session, job_id)
     assert job["status"] == "failed"
