@@ -24,6 +24,7 @@ except Exception:
 INGEST_QUEUE = Queue("ingest", connection=_redis_conn) if _redis_conn else None
 RETRY_POLICY = Retry(max=3, interval=[10, 60])
 TRANSIENT_STATUSES = {429, 500, 502, 503, 504}
+PROGRESS_FLUSH_INTERVAL = max(1, int(os.getenv("INGEST_PROGRESS_FLUSH_INTERVAL", "10")))
 
 
 def _ingest_attempt_context() -> Dict[str, Any]:
@@ -74,7 +75,42 @@ def _run_ingest(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             return {}
 
         job_helper.mark_job_running(db, job_id, total_files=0)
-        result = drive_ingest.ingest_drive(**payload)
+
+        last_reported = 0
+        latest_done = 0
+        last_known_total: Optional[int] = None
+        pending_logs: list[str] = []
+
+        def flush_progress(force: bool = False) -> None:
+            nonlocal last_reported
+            if not pending_logs and latest_done - last_reported <= 0 and not force:
+                return
+            increment = max(0, latest_done - last_reported)
+            message = "\n".join(pending_logs) if pending_logs else None
+            if increment <= 0 and not message:
+                return
+            job_helper.bump_job_progress(db, job_id, inc=increment or 0, message=message)
+            pending_logs.clear()
+            if increment:
+                last_reported = latest_done
+
+        def on_progress(done: int, total: Optional[int], msg: str = "") -> None:
+            nonlocal latest_done, last_known_total
+            if total is not None:
+                total_val = max(0, int(total or 0))
+                if last_known_total != total_val:
+                    job_helper.mark_job_running(db, job_id, total_files=total_val)
+                    last_known_total = total_val
+            done_val = max(0, int(done or 0))
+            if done_val > latest_done:
+                latest_done = done_val
+            if msg:
+                pending_logs.append(msg)
+            if latest_done - last_reported >= PROGRESS_FLUSH_INTERVAL:
+                flush_progress()
+
+        result = drive_ingest.ingest_drive(on_progress=on_progress, **payload)
+        flush_progress(force=True)
         errors = int(result.get("errors") or 0)
         if errors:
             summary = f"Ingest completed with {errors} error(s)."
@@ -107,6 +143,10 @@ def _run_ingest(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         return result
     except Exception as exc:  # pragma: no cover
+        try:
+            flush_progress(force=True)
+        except Exception:
+            pass
         summary = _format_error(exc)
         duration_ms = round((time.perf_counter() - timing_start) * 1000, 3)
         if _is_transient_error(exc):

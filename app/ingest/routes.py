@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, Callable, Protocol
 import inspect
+import os
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, status, Depends as FastAPIDepends
@@ -22,6 +23,8 @@ from app.limits import check_ingest_quota
 from app.runtime import ensure_writes_enabled
 from app.auth import csrf_protect, get_current_user
 from app.logging_utils import log_event
+
+PROGRESS_FLUSH_INTERVAL = max(1, int(os.getenv("INGEST_PROGRESS_FLUSH_INTERVAL", "10")))
 
 
 class DriveIngestCallable(Protocol):
@@ -234,19 +237,34 @@ def _run_drive_job(job_id: str) -> None:
 
         ingest_callable = INGEST_DRIVE_CALLABLE
         last_reported = 0
+        latest_done = 0
+        pending_logs: list[str] = []
+
+        def flush_progress(force: bool = False) -> None:
+            nonlocal last_reported
+            if not pending_logs and latest_done - last_reported <= 0 and not force:
+                return
+            increment = max(0, latest_done - last_reported)
+            message = "\n".join(pending_logs) if pending_logs else None
+            if increment <= 0 and not message:
+                return
+            job_helper.bump_job_progress(db, job_id, inc=increment or 0, message=message)
+            pending_logs.clear()
+            if increment:
+                last_reported = latest_done
 
         def on_progress(done: int, total: int, msg: str = ""):
             if total is not None and total >= 0:
                 job_helper.mark_job_running(db, job_id, total_files=int(total))
 
-            nonlocal last_reported
+            nonlocal latest_done
             done_val = max(0, int(done or 0))
-            increment = max(0, done_val - last_reported)
-            if increment:
-                job_helper.bump_job_progress(db, job_id, inc=increment, message=msg or None)
-                last_reported = done_val
-            elif msg:
-                job_helper.append_job_log(db, job_id, msg)
+            if done_val > latest_done:
+                latest_done = done_val
+            if msg:
+                pending_logs.append(msg)
+            if latest_done - last_reported >= PROGRESS_FLUSH_INTERVAL:
+                flush_progress()
 
         try:
             result = ingest_callable(
@@ -260,6 +278,7 @@ def _run_drive_job(job_id: str) -> None:
             job_helper.finish_job(db, job_id, status="failed", error_summary=str(err))
             _log_inline_failure(job_id, user_id, start_time, str(err))
             return
+        flush_progress(force=True)
         errors = int((result or {}).get("errors") or 0)
         if errors:
             summary = f"Ingest completed with {errors} error(s)."

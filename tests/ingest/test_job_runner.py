@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.ingest import job_helper, routes as ingest_routes
+from app.ingest import job_helper, routes as ingest_routes, queue as ingest_queue
 
 
 def test_run_drive_job_succeeds_and_logs_progress(db_session, session_factory, test_user, monkeypatch):
@@ -33,7 +33,8 @@ def test_run_drive_job_succeeds_and_logs_progress(db_session, session_factory, t
     assert job is not None
     assert job["status"] == "succeeded"
     assert job["processed_files"] == 3
-    assert messages and messages[-1] == "processed file 3"
+    assert messages
+    assert "processed file 3" in messages[-1]
 
 
 def test_run_drive_job_fails_when_payload_missing_user(db_session, monkeypatch):
@@ -70,3 +71,39 @@ def test_run_drive_job_fails_when_ingest_reports_errors(db_session, session_fact
     assert job is not None
     assert job["status"] == "failed"
     assert "error" in (job["error_summary"] or "").lower()
+
+
+def test_worker_run_ingest_throttles_progress_updates(db_session, session_factory, test_user, monkeypatch):
+    job_id = job_helper.create_job(
+        db_session,
+        user_id=test_user.id,
+        payload={"user_id": test_user.id, "max_files": 5},
+        total_files=0,
+        status="queued",
+    )
+
+    bumps: list[int] = []
+    original_bump = job_helper.bump_job_progress
+
+    def spy_bump(db, job_id_arg, inc=1, message=None):
+        bumps.append(int(inc or 0))
+        return original_bump(db, job_id_arg, inc=inc, message=message)
+
+    def fake_ingest(user_id, name_filter=None, max_files=None, reembed_all=False, on_progress=None):
+        assert on_progress is not None
+        for i in range(1, 6):
+            on_progress(i, 5, f"processed file {i}")
+        return {"found": 5, "ingested": 5, "errors": 0}
+
+    monkeypatch.setattr(job_helper, "bump_job_progress", spy_bump)
+    monkeypatch.setattr(ingest_queue.drive_ingest, "ingest_drive", fake_ingest)
+    monkeypatch.setattr(ingest_queue, "PROGRESS_FLUSH_INTERVAL", 2)
+
+    ingest_queue._run_ingest(job_id, {"user_id": test_user.id, "max_files": 5, "name_filter": None, "reembed_all": False})
+
+    db_session.expire_all()
+    job = job_helper.get_job(db_session, job_id)
+    assert job is not None
+    assert job["status"] == "succeeded"
+    assert job["processed_files"] == 5
+    assert bumps == [2, 2, 1]
