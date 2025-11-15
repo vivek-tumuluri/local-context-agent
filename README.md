@@ -1,6 +1,6 @@
 # Local Context Agent
 
-FastAPI app + RQ worker that authenticates to Google on behalf of a user, ingests Drive + Calendar data, stores normalized metadata in SQL + per-user Chroma collections, and exposes retrieval/search/answering endpoints backed by OpenAI embeddings. The current iteration focuses on production-minded ingest: throttled job progress logging, transactional page-level commits, and token-aware embedding batching so large documents no longer crash the pipeline.
+FastAPI app + RQ worker that authenticates to Google on behalf of a user, ingests Drive + Calendar data, stores normalized metadata in SQL + per-user Chroma collections, and exposes retrieval/search/answering endpoints backed by OpenAI embeddings. The focus is reliable ingest and retrieval: throttled job progress logging, transactional page-level commits, and token-aware embedding batching that keeps large documents within OpenAI limits.
 
 ---
 
@@ -13,10 +13,10 @@ FastAPI app + RQ worker that authenticates to Google on behalf of a user, ingest
 `app/ingest/drive_pipeline.py` contains the canonical “normalize → dedupe → chunk → embed → persist” flow. Every entrypoint (`/ingest/drive`, `/ingest/drive/start`, legacy scripts, worker jobs) funnels through this module so bug fixes land everywhere.
 
 **EmbeddingBatcher**  
-A token-aware batching layer slices chunk uploads across multiple OpenAI requests. It monitors cumulative tokens + chunk counts per batch, flushes automatically inside `enqueue_doc`, and only deletes stale chunks after a document’s entire chunk set is safely upserted. Oversized docs no longer blow the 300k tokens/request limit.
+A token-aware batching layer slices chunk uploads across multiple OpenAI requests. It monitors cumulative tokens + chunk counts per batch, flushes automatically inside `enqueue_doc`, and only deletes stale chunks after a document’s entire chunk set is safely upserted to stay under OpenAI request limits.
 
 **Throttled job progress**  
-Both inline and RQ workers buffer progress/log updates and commit Drive ingest work per Drive page. That cuts database spam and keeps job metrics consistent even on massive runs.
+Both inline and RQ workers buffer progress/log updates and commit Drive ingest work per Drive page to keep database writes predictable on large runs.
 
 **RAG-ready APIs**  
 `/rag/search` returns ranked chunks with confidence scores, while `/rag/answer` feeds those chunks into OpenAI Chat, streaming answers with inline citations.
@@ -29,27 +29,19 @@ Pytest suite includes fake Google clients, fake OpenAI embeddings, golden Drive 
 ## Repository Layout
 
 ```
-app/
-├── main.py              # FastAPI bootstrap + dependency overrides
-├── auth.py              # Google OAuth, sessions, CSRF
-├── ingest/
-│   ├── routes.py        # /ingest/drive/start, job polling, inline runner
-│   ├── drive_ingest.py  # Google SDK adapters + legacy synchronous route
-│   ├── drive_pipeline.py# normalize/dedupe/embed pipeline + EmbeddingBatcher
-│   ├── calendar_ingest.py
-│   └── queue.py         # RQ entrypoint (_run_ingest) + enqueue helpers
-├── rag/
-│   ├── routes.py        # /rag/search, /rag/answer
-│   └── vector.py        # Chroma helpers, OpenAI embeddings client
-├── models.py            # SQLAlchemy models for users, sessions, jobs, content
-├── db.py                # Session factory + engine bootstrap
-└── routes/jobs.py       # Admin endpoints for job listings
-scripts/
-├── create_tables.py     # Bootstraps DB schema (sqlite by default)
-└── worker.py            # RQ worker entrypoint
-tests/
-├── ingest/...           # Drive pipeline + routes tests
-└── fakes.py             # Fake OpenAI, Chroma, etc.
+backend/
+├── app/
+│   ├── api/              # FastAPI factory + wiring
+│   ├── core/             # auth/db/models/settings/logging/etc.
+│   ├── routes/           # auth, ingest, rag, health, jobs routers
+│   ├── ingest/           # pipeline, queue, helpers
+│   ├── rag/              # chunk/vector utilities
+│   └── main.py           # shim exposing app.api.main.app
+├── scripts/              # create_tables.py, worker.py
+├── tests/                # pytest suite (ingest, rag, auth, metrics...)
+├── requirements.txt
+└── pytest.ini
+.env stays at repo root.
 ```
 
 ---
@@ -61,7 +53,7 @@ tests/
 * Google Cloud OAuth credentials with Drive + Calendar read scopes
 * OpenAI API key (embeddings + chat)
 * Redis (cloud Upstash URL or local redis-server) for RQ jobs
-* Local filesystem access for Chroma (default `.chroma/`)
+* Local filesystem access for Chroma (default `backend/.chroma/`)
 
 ---
 
@@ -73,6 +65,7 @@ cd local-context-agent
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
+cd backend
 pip install -r requirements.txt
 python -m scripts.create_tables
 ```
@@ -97,29 +90,32 @@ The app autoloads `.env` via `python-dotenv`.
 
 ## Running Everything
 
-Open 3 terminals (all from repo root, with `.venv` activated):
+Open 3 terminals (all with `.venv` activated). Run everything from `backend/`:
 
 1. **API**
    ```bash
-   source .venv/bin/activate
-   set -a; source .env; set +a
+   cd backend
+   source ../.venv/bin/activate
+   set -a; source ../.env; set +a
    uvicorn app.main:app --reload
    # Swagger: http://localhost:8000/docs
    ```
 
 2. **Worker**
    ```bash
-   source .venv/bin/activate
-   set -a; source .env; set +a
+   cd backend
+   source ../.venv/bin/activate
+   set -a; source ../.env; set +a
    export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES  # macOS fork guard
    python -m scripts.worker
    ```
 
 3. **Client (curl / httpie)**
    ```bash
-   source .venv/bin/activate
-   set -a; source .env; set +a
-   export BASE_URL="http://127.0.0.1:8000"
+    cd backend
+    source ../.venv/bin/activate
+    set -a; source ../.env; set +a
+    export BASE_URL="http://127.0.0.1:8000"
    ```
 
 ---
@@ -202,27 +198,64 @@ Both endpoints embed the query, query the user’s Chroma collection, and (for `
 
 ---
 
+## Manual Testing (curl/Postman)
+
+Swagger does not automatically send the session and CSRF cookies required by protected routes. To exercise the API manually:
+
+1. **Authenticate once via browser**
+   * Start the API + worker as described above.
+   * Visit `http://127.0.0.1:8000/auth/google`, complete the Google consent flow, and land on `/auth/me`.
+   * Inspect your browser cookies for the domain (e.g., `127.0.0.1`) and note the values of `lc_session` and `lc_csrf`.
+
+2. **Export helpers in your shell**
+   ```bash
+   export BASE_URL="http://127.0.0.1:8000"
+   export SESSION="paste lc_session value here"
+   export CSRF_COOKIE="paste lc_csrf value here"
+   ```
+
+3. **Fetch a matching CSRF header token**
+   ```bash
+   CSRF=$(curl -s "$BASE_URL/auth/me" \
+     --cookie "lc_session=$SESSION; lc_csrf=$CSRF_COOKIE" \
+     | jq -r '.csrf_token')
+   ```
+
+4. **Call any stateful endpoint (ingest, rag, etc.)**
+   ```bash
+   curl -s -X POST "$BASE_URL/rag/search" \
+     -H "Content-Type: application/json" \
+     -H "X-CSRF-Token: $CSRF" \
+     --cookie "lc_session=$SESSION; lc_csrf=$CSRF_COOKIE" \
+     -d '{"query":"montreal itinerary","k":6}' \
+     | jq .
+   ```
+
+Postman users can add the same cookies under the “Cookies” tab and include `X-CSRF-Token` in headers. This mirrors what the production frontend would do automatically (browser keeps the cookies; client adds the CSRF header).
+
+---
 ## Worker & Queue Tips
 
 * **Clearing the queue** (pending + failed):
-  ```bash
-  source .venv/bin/activate
-  set -a; source .env; set +a
-  python - <<'PY'
-  import os
-  from redis import from_url
-  from rq import Queue
-  from rq.registry import FailedJobRegistry
+```bash
+source .venv/bin/activate
+set -a; source .env; set +a
+cd backend
+python - <<'PY'
+import os
+from redis import from_url
+from rq import Queue
+from rq.registry import FailedJobRegistry
 
-  conn = from_url(os.environ["REDIS_URL"])
-  q = Queue("ingest", connection=conn)
-  q.empty()
-  failed = FailedJobRegistry(queue=q)
-  for job_id in failed.get_job_ids():
-      failed.remove(job_id, delete_job=True)
-  print("Queue and failed registry cleared.")
-  PY
-  ```
+conn = from_url(os.environ["REDIS_URL"])
+q = Queue("ingest", connection=conn)
+q.empty()
+failed = FailedJobRegistry(queue=q)
+for job_id in failed.get_job_ids():
+    failed.remove(job_id, delete_job=True)
+print("Queue and failed registry cleared.")
+PY
+```
 
 * **Retry behavior** – RQ automatically retries transient failures (`RETRY_POLICY` in `queue.py`). Token-limit errors count as permanent; batching fixes should prevent them.
 
@@ -234,6 +267,7 @@ Both endpoints embed the query, query the user’s Chroma collection, and (for `
 
 ```bash
 source .venv/bin/activate
+cd backend
 pytest tests/ingest/test_drive_ingest.py
 pytest tests/ingest/test_drive_pipeline.py -k drive
 pytest -q                     # entire suite
