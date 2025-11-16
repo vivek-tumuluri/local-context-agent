@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.routes import rag_routes
-from app.rag import vector
+from app.rag import vector_store as vector
 
 
 def _seed_docs(user_id: str):

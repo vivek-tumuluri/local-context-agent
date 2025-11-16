@@ -2,6 +2,7 @@ import time
 import uuid
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 from app.core.logging_utils import log_event
@@ -21,6 +22,17 @@ load_dotenv()
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Local Context Agent")
+
+    allowed_origins = [
+        "http://localhost:5173",
+    ]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     app.include_router(auth_router)
     app.include_router(drive_router)

@@ -10,7 +10,7 @@ from app.core.models import ContentIndex, IngestionJob, SourceState
 from app.ingest.text_normalize import normalize_text, compute_content_hash
 from app.ingest.should_ingest import should_reingest
 from app.ingest.chunking import split_by_chars
-from app.rag import vector
+from app.rag import vector_store as vector
 from app.core.logging_utils import log_event
 from app.core.metrics import StageTimer
 

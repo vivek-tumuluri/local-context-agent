@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.rag import vector
+from app.rag import vector_store as vector
 
 
 def _seed_docs(user_id: str, docs):

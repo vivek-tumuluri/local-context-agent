@@ -4,7 +4,7 @@ import json
 import math
 from pathlib import Path
 
-from app.rag import vector
+from app.rag import vector_store as vector
 
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "golden_set.json"
 

@@ -12,6 +12,7 @@ openai
 tiktoken
 sqlalchemy
 psycopg2-binary
+pgvector
 pytest
 pytest-asyncio
 pytest-cov

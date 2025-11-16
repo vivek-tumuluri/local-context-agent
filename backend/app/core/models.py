@@ -2,9 +2,12 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column, String, Integer, DateTime, Boolean, JSON, UniqueConstraint, Index, ForeignKey
+    Column, String, Integer, DateTime, Boolean, JSON, UniqueConstraint, Index, ForeignKey, Text
 )
 from sqlalchemy.orm import declarative_base
+from pgvector.sqlalchemy import Vector
+
+from app.rag.embedding_config import EMBED_DIM
 
 Base = declarative_base()
 utcnow = lambda: datetime.now(timezone.utc)
@@ -86,6 +89,25 @@ class ContentIndex(Base):
         UniqueConstraint('user_id', 'source', 'id', name='u_user_source_id'),
         Index("ix_content_user_source_modified", "user_id", "source", "modified_time"),
         Index("ix_content_user_source_trashed", "user_id", "source", "is_trashed"),
+    )
+
+
+class DocChunk(Base):
+    __tablename__ = "doc_chunks"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, index=True, nullable=False)
+    doc_id = Column(String, index=True, nullable=False)
+    source = Column(String, default="drive", nullable=False)
+    title = Column(String, nullable=True)
+    text = Column(Text, nullable=False)
+    chunk_metadata = Column("metadata", JSON, default=dict)
+    embedding = Column(Vector(EMBED_DIM), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_doc_chunks_user_doc", "user_id", "doc_id"),
     )
 
 

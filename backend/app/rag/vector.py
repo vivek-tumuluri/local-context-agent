@@ -13,10 +13,11 @@ import chromadb
 from chromadb.api.types import GetResult
 from openai import OpenAI
 
+from .embedding_config import EMBED_MODEL, EMBED_DIM
 
 log = logging.getLogger("vector")
 
-EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
+# EMBED_DIM is currently unused in this module, but exposed for compatibility with pgvector.
 
 
 _default_dir = os.getenv("CHROMA_DIR")

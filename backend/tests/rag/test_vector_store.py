@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.rag import vector
+from app.rag import vector_store as vector
 from tests.fakes import FakeEmbeddingsClient
 
 

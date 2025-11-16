@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.ingest import drive_pipeline
 from app.core.models import ContentIndex, IngestionJob, SourceState
 from app.ingest.text_normalize import compute_content_hash
-from app.rag import vector as vector_module
+from app.rag import vector_store as vector_module
 
 
 def _make_file(fid: str, **meta) -> Dict[str, str]:

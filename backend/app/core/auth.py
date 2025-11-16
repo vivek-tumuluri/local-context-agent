@@ -24,7 +24,7 @@ from app.core.models import (
     UserSession,
 )
 from app.integrations.google_clients import build_flow
-from app.rag import vector
+from app.rag import vector_store as vector
 from app.core.runtime import ensure_writes_enabled
 
 from cryptography.fernet import Fernet, InvalidToken

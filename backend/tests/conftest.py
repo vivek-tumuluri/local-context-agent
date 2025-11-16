@@ -32,7 +32,7 @@ from app.core.models import Base, User
 from app.routes import ingest_routes
 from app.ingest import drive_ingest
 from app.routes import jobs as jobs_routes
-from app.rag import vector as vector_module
+from app.rag import vector_store as vector_module
 from app.routes import rag_routes
 from tests.fakes import FakeChromaClient, FakeEmbeddingsClient, FakeChatCompletions
 
@@ -143,15 +143,16 @@ def fake_vector_env(monkeypatch) -> Tuple[FakeChromaClient, FakeEmbeddingsClient
     fake_client = FakeChromaClient()
     embeddings = FakeEmbeddingsClient()
 
-    monkeypatch.setattr(vector_module, "_collection_cache", {})
-    monkeypatch.setattr(vector_module, "_chroma", fake_client)
-    monkeypatch.setattr(vector_module, "_db", lambda: fake_client, raising=False)
-    monkeypatch.setattr(vector_module, "_client", SimpleNamespace(embeddings=embeddings), raising=False)
-    monkeypatch.setattr(vector_module.time, "sleep", lambda *_: None, raising=False)
+    backend_impl = vector_module.BACKEND
+    monkeypatch.setattr(backend_impl, "_collection_cache", {})
+    monkeypatch.setattr(backend_impl, "_chroma", fake_client)
+    monkeypatch.setattr(backend_impl, "_db", lambda: fake_client, raising=False)
+    monkeypatch.setattr(backend_impl, "_client", SimpleNamespace(embeddings=embeddings), raising=False)
+    monkeypatch.setattr(backend_impl.time, "sleep", lambda *_: None, raising=False)
 
     yield fake_client, embeddings
 
-    vector_module.shutdown()
+    backend_impl.shutdown()
 
 
 @pytest.fixture()

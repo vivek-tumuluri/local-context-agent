@@ -11,7 +11,7 @@ from openai import OpenAI
 
 from app.core.auth import csrf_protect, get_current_user
 from app.core.limits import check_rag_quota
-from app.rag.vector import query as vec_query
+from app.rag.vector_store import query as vec_query
 from app.core.logging_utils import log_event
 
 router = APIRouter(prefix="/rag", tags=["rag"])
