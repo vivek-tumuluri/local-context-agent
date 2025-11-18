@@ -7,7 +7,7 @@ from tests.fakes import FakeEmbeddingsClient
 
 
 def test_upsert_query_and_list_ids(fake_vector_env):
-    _, embeddings = fake_vector_env
+    embeddings = fake_vector_env
     chunks = [
         {"id": "u-doc1-0", "text": "Launch plan draft outlines QA freeze.", "meta": {"doc_id": "doc1", "source": "drive"}},
         {"id": "u-doc2-0", "text": "Customer updates owned by Priya.", "meta": {"doc_id": "doc2", "source": "drive"}},
@@ -38,7 +38,7 @@ def test_delete_paths(fake_vector_env):
 
 
 def test_embed_with_retry_handles_rate_limits(fake_vector_env, monkeypatch):
-    client = fake_vector_env[1]
+    client = fake_vector_env
     assert isinstance(client, FakeEmbeddingsClient)
     client.queue_failure(RuntimeError("Rate limit exceeded, try again in 10 ms"))
     points = vector._embed_with_retry(["text needing embedding"])
@@ -46,7 +46,7 @@ def test_embed_with_retry_handles_rate_limits(fake_vector_env, monkeypatch):
 
 
 def test_embed_with_retry_bubbles_non_rate_limit_errors(fake_vector_env):
-    client = fake_vector_env[1]
+    client = fake_vector_env
     assert isinstance(client, FakeEmbeddingsClient)
     client.queue_failure(RuntimeError("fatal error"))
     with pytest.raises(RuntimeError, match="fatal"):

@@ -1,100 +1,56 @@
 # Local Context Agent
 
-End-to-end personal RAG stack with:
-- FastAPI backend + RQ worker for Google auth, Drive ingest, and retrieval.
-- Dual vector backends: Chroma (default) or Postgres pgvector (set `VECTOR_BACKEND=pgvector`).
-- OpenAI embeddings + chat for answers.
-- Vite/React frontend for login, ingest controls, and Q&A.
+Production-ready personal RAG stack. FastAPI backend with pgvector, OpenAI embeddings/chat, RQ worker for ingestion, and a Vite/React frontend for Google auth, ingest, and Q&A.
 
----
+## High-Level Overview
+- Sign in with Google → obtain Drive/Calendar access tokens (stored encrypted).
+- Ingest Google Drive/Calendar items → chunk text → embed with OpenAI → store chunks + vectors in Postgres (pgvector).
+- Query via `/rag/search` and `/rag/answer` → fetch top-k similar chunks from pgvector → format answers with citations using OpenAI chat.
+- Optional RQ worker handles ingest asynchronously; fallback inline ingest also available.
 
-## What it does
-- OAuth with Google, stores tokens in Postgres, issues HttpOnly session cookies + CSRF.
-- Ingests Google Drive files: normalize → chunk → embed → persist. Calendar ingest exists but Drive is primary.
-- Stores metadata in SQL; stores embeddings in Chroma or pgvector.
-- `/rag/search` and `/rag/answer` retrieve relevant chunks and generate answers with citations.
-- Background ingest via RQ worker (Redis) or inline fallback.
-
----
-
-## Repo layout
-```
-backend/
-  app/
-    api/            # FastAPI factory
-    core/           # auth, db, models, settings, logging
-    ingest/         # Drive pipeline, queue, chunking
-    rag/            # embeddings, vector backends (chroma + pgvector)
-    routes/         # auth, ingest, rag, health, jobs
-    main.py         # ASGI entry
-  scripts/          # create_tables.py, worker.py
-  tests/            # pytest suite (fakes for Drive, OpenAI, Chroma)
-frontend/
-  src/              # Vite + React UI (login, ingest panel, Q&A)
-.env                # loaded by python-dotenv
-```
-
----
+## Architecture
+- **Backend:** FastAPI + SQLAlchemy. Routes for auth, ingest (Drive, Calendar), RAG search/answer, health/jobs.
+- **Vector store:** Postgres + pgvector (DocChunk.embedding). ivfflat index created during init. No Chroma codepaths.
+- **Ingestion:** Drive and Calendar pipelines → chunk ➜ embed (OpenAI) ➜ store chunks/metadata + vectors in Postgres.
+- **Frontend:** Vite/React app for login, ingest controls, and chat retrieval UI.
+- **Workers:** Optional RQ worker for async ingest; can also run inline.
+- **Tests:** Pytest with fakes for OpenAI and Google; network blocked unless `ALLOW_NETWORK=1`.
 
 ## Prerequisites
-- Python 3.10+
-- Postgres (for pgvector) or SQLite (dev/tests; pgvector tests are skipped)
-- Redis (for RQ worker)
-- Google OAuth creds with Drive read scope
+- Python 3.10+, Node 18+
+- Postgres with `vector` extension available
 - OpenAI API key
-- Node 18+ (for the frontend)
+- Google OAuth client (Drive read scope)
+- Redis (for RQ worker)
 
----
+## Environment (key vars)
+- `DATABASE_URL` (Postgres URI)
+- `OPENAI_API_KEY`
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OAUTH_REDIRECT_URI`
+- `SESSION_SECRET`, `REDIS_URL`
+- Embedding controls: `EMBED_MODEL`, `EMBED_BATCH_SIZE`, `MAX_CHARS_PER_CHUNK`, `EMBED_MAX_RETRIES`, `EMBED_BASE_BACKOFF`
 
-## Environment variables (key ones)
-```
-DATABASE_URL=postgresql://user:pass@host:5432/dbname   # use Postgres for pgvector
-SESSION_SECRET=<long-random>
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-OAUTH_REDIRECT_URI=http://localhost:8000/auth/google/callback
-OPENAI_API_KEY=...
-REDIS_URL=redis://localhost:6379/0
-VECTOR_BACKEND=chroma | pgvector   # default: chroma
-CHROMA_DIR=backend/.chroma         # optional override
-EMBED_MODEL=text-embedding-3-small # default
-```
-
-For pgvector: connect to Postgres and run `CREATE EXTENSION IF NOT EXISTS vector;` once.
-
----
-
-## Setup (backend)
+## Setup
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
 cd backend
 pip install -r requirements.txt
-# ensure tables (and pgvector index if on Postgres)
-python -m scripts.create_tables
+python -m scripts.create_tables   # enables pgvector extension, creates tables, builds ivfflat index
 ```
 
----
-
-## Running (3 terminals)
+## Run
 Backend API:
 ```bash
 cd backend
-source ../.venv/bin/activate
-set -a; source ../.env; set +a
-export VECTOR_BACKEND=pgvector   # or chroma
-export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES  # macOS
+source ../.env
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Worker:
+Worker (optional, for queued ingest):
 ```bash
 cd backend
-source ../.venv/bin/activate
-set -a; source ../.env; set +a
-export VECTOR_BACKEND=pgvector   # match API
-export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
+source ../.env
 python -m scripts.worker
 ```
 
@@ -106,37 +62,13 @@ npm run dev -- --host --port 5173
 ```
 Visit http://localhost:5173/.
 
----
-
-## Using the app
-1) **Login** via Google (button in the frontend) → sets session + CSRF.  
-2) **Run Drive ingest** from the dashboard (defaults `max_files: 100` in UI; backend limit is env/route controlled).  
-3) **Ask questions** in the chat area → `/rag/answer` retrieves chunks (via selected backend) and calls OpenAI chat.  
-4) **Disconnect** to clear user data + vector entries.
-
----
-
-## Vector backends
-- **Chroma** (default): on-disk store under `CHROMA_DIR`.  
-- **pgvector**: embeddings stored in `doc_chunks` table with ivfflat index. Enable with `VECTOR_BACKEND=pgvector` and Postgres + `vector` extension.
-
----
-
 ## Testing
 ```bash
 cd backend
-pytest -q          # pgvector test skipped on SQLite
+pytest
 ```
-Network calls are blocked in tests unless `ALLOW_NETWORK=1`. Fakes cover Google Drive, OpenAI embeddings, and Chroma.
-
----
+Network calls blocked unless `ALLOW_NETWORK=1`.
 
 ## Notes
-- Job progress is throttled; chunking respects max chars per chunk and OpenAI limits.
-- Unsupported/binary files are skipped without failing ingest.
-- The frontend only posts to the existing APIs; backend behavior and signatures are unchanged aside from the vector backend toggle.
-
----
-
-## License
-MIT
+- Vectors live in `doc_chunks.embedding` (pgvector). SQLite test runs skip index creation and use an in-Python distance fallback.
+- Rebuild locally: drop/truncate Postgres tables as needed, rerun `python -m scripts.create_tables`, reingest.***

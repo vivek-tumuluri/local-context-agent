@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.ingest import drive_pipeline
-from app.core.models import ContentIndex, IngestionJob, SourceState
+from app.core.models import ContentIndex, DocChunk, IngestionJob, SourceState
 from app.ingest.text_normalize import compute_content_hash
 from app.rag import vector_store as vector_module
 
@@ -71,7 +71,7 @@ def test_process_drive_file_skips_when_hash_unchanged(db_session, fake_vector_en
     )
     assert summary["processed"] == 1
     assert summary["embedded"] == 0
-    _, embeddings = fake_vector_env
+    embeddings = fake_vector_env
     assert embeddings.calls == []
 
 
@@ -236,12 +236,10 @@ def test_process_drive_file_attaches_drive_metadata(db_session, fake_vector_env,
         parse_bytes=lambda data, mime: data.decode(),
     )
     _ingest_single_doc(db_session, test_user.id, summary)
-    fake_client, _ = fake_vector_env
-    key = vector_module._collection_key(user_id=test_user.id)
-    collection = fake_client.collections[key]
-    assert collection.rows, "expected chunks to be stored"
-    sample_row = next(iter(collection.rows.values()))
-    meta = sample_row.meta
+    rows = db_session.query(DocChunk).filter(DocChunk.user_id == test_user.id, DocChunk.doc_id == "doc-meta").all()
+    assert rows, "expected chunks to be stored"
+    sample_row = rows[0]
+    meta = sample_row.chunk_metadata
     assert meta["source"] == "drive"
     assert meta["title"] == "Launch Plan"
     assert meta["doc_id"] == "doc-meta"
@@ -268,7 +266,7 @@ def test_embedding_batcher_batches_multiple_docs(db_session, fake_vector_env, te
         drive_pipeline._finalize_ready_docs(db_session, test_user.id, ready)
     ready = batcher.flush(force=True)
     drive_pipeline._finalize_ready_docs(db_session, test_user.id, ready)
-    _, embeddings = fake_vector_env
+    embeddings = fake_vector_env
     assert len(embeddings.calls) == 1
     combined_input = embeddings.calls[0]["input"]
     assert any("Doc One" in text for text in combined_input)
@@ -304,7 +302,7 @@ def test_embedding_batcher_splits_large_doc_when_token_limit_hit(db_session, fak
     ready = batcher.flush(force=True)
     drive_pipeline._finalize_ready_docs(db_session, test_user.id, ready)
 
-    _, embeddings = fake_vector_env
+    embeddings = fake_vector_env
     assert len(embeddings.calls) > 1, "expected large doc to be split across multiple embedding calls"
     chunk_ids = vector_module.list_doc_chunk_ids(doc_id, user_id=test_user.id)
     assert len(chunk_ids) == len(chunk_rows)

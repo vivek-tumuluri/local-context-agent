@@ -1,22 +1,149 @@
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Dict, List, Optional
+import os
+import random
+import re
+import time
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from openai import OpenAI
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
 from app.core.models import DocChunk
-from app.rag import vector as vector_backend
+from app.rag.embedding_config import EMBED_DIM, EMBED_MODEL
 
 log = logging.getLogger("vector_pg")
+BACKEND_NAME = "pgvector"
 
-EMBED_MODEL = vector_backend.EMBED_MODEL
-MAX_CHARS_PER_CHUNK = vector_backend.MAX_CHARS_PER_CHUNK
-BATCH_SIZE = vector_backend.BATCH_SIZE
+DEFAULT_EMBED_BATCH_SIZE = 40
+DEFAULT_MAX_CHARS_PER_CHUNK = 3000
+DEFAULT_MAX_RETRIES = 6
+DEFAULT_BASE_BACKOFF = 0.6
 
-_embed_with_retry = vector_backend._embed_with_retry
+BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", str(DEFAULT_EMBED_BATCH_SIZE)))
+MAX_CHARS_PER_CHUNK = int(os.getenv("MAX_CHARS_PER_CHUNK", str(DEFAULT_MAX_CHARS_PER_CHUNK)))
+MAX_RETRIES = int(os.getenv("EMBED_MAX_RETRIES", str(DEFAULT_MAX_RETRIES)))
+BASE_BACKOFF = float(os.getenv("EMBED_BASE_BACKOFF", str(DEFAULT_BASE_BACKOFF)))
+
+_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_retry_after_re = re.compile(r"try again in (\d+)\s*ms", re.IGNORECASE)
+
+
+def _clean_texts(texts: Sequence[str]) -> List[str]:
+    out: List[str] = []
+    for text in texts:
+        if not text:
+            continue
+        t = text.strip()
+        if not t:
+            continue
+        out.append(t[:MAX_CHARS_PER_CHUNK])
+    return out
+
+
+def _embed_once(texts: Sequence[str]) -> List[List[float]]:
+    cleaned = _clean_texts(list(texts))
+    if not cleaned:
+        return []
+    resp = _client.embeddings.create(input=cleaned, model=EMBED_MODEL)
+    return [d.embedding for d in resp.data]
+
+
+def _is_rate_limit(err: Exception) -> bool:
+    s = str(err).lower()
+    return "rate limit" in s or "429" in s or "rate_limit_exceeded" in s
+
+
+def _parse_retry_after_seconds(err: Exception) -> Optional[float]:
+    try:
+        resp = getattr(err, "response", None)
+        if resp and hasattr(resp, "headers"):
+            ra = resp.headers.get("retry-after")  # type: ignore[attr-defined]
+            if ra:
+                return float(ra)
+    except Exception:
+        pass
+
+    m = _retry_after_re.search(str(err))
+    if m:
+        try:
+            return float(m.group(1)) / 1000.0
+        except Exception:
+            return None
+    return None
+
+
+def _sleep_with_jitter(attempt: int, retry_after_s: Optional[float]) -> None:
+    if retry_after_s and retry_after_s > 0:
+        delay = retry_after_s
+    else:
+        delay = BASE_BACKOFF * (2**attempt)
+        delay += random.random() * 0.25
+    time.sleep(delay)
+
+
+def _embed_with_retry(texts: Sequence[str]) -> List[List[float]]:
+    for attempt in range(MAX_RETRIES):
+        try:
+            return _embed_once(texts)
+        except Exception as exc:
+            if _is_rate_limit(exc):
+                ra = _parse_retry_after_seconds(exc)
+                log.warning(
+                    "[vector_pg] Rate limited (attempt %d/%d). %s",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    f"Retry-After={ra}s" if ra else "Exponential backoff",
+                )
+                _sleep_with_jitter(attempt, ra)
+                continue
+            log.error("[vector_pg] Embedding error (non-rate-limit): %s", exc)
+            raise
+    raise RuntimeError("Embedding repeatedly rate-limited; exceeded max retries.")
+
+
+def _l2_distance(a: Sequence[float], b: Sequence[float]) -> float:
+    n = min(len(a), len(b))
+    return float(sum((a[i] - b[i]) ** 2 for i in range(n)))
+
+
+def _is_postgres_session(session: Session) -> bool:
+    try:
+        bind = session.get_bind()
+        return bool(bind and bind.dialect.name == "postgresql")
+    except Exception:
+        return False
+
+
+def _coerce_embedding(val: Any) -> List[float]:
+    if isinstance(val, memoryview):
+        try:
+            val = val.tobytes().decode()
+        except Exception:
+            val = val.tolist()
+    if isinstance(val, (list, tuple)):
+        try:
+            return [float(x) for x in val]
+        except Exception:
+            return []
+    if isinstance(val, (bytes, bytearray)):
+        try:
+            val = val.decode()
+        except Exception:
+            return []
+    if isinstance(val, str):
+        try:
+            data = json.loads(val)
+            if isinstance(data, list):
+                return [float(x) for x in data]
+        except Exception:
+            return []
+    return []
 
 
 def _normalize_user(user_id: Optional[str]) -> str:
@@ -60,7 +187,7 @@ class _PgCollection:
                         title=metadatas[idx].get("title") if idx < len(metadatas) else None,
                         text=documents[idx] if idx < len(documents) else "",
                         chunk_metadata=metadatas[idx] if idx < len(metadatas) else {},
-                        embedding=embeddings[idx] if idx < len(embeddings) else [],
+                        embedding=list(embeddings[idx]) if idx < len(embeddings) else [],
                     )
                 )
             if rows:
@@ -128,7 +255,7 @@ def upsert(chunks: List[Dict[str, Any]], user_id: Optional[str] = None) -> Dict[
                     title=meta.get("title") or meta.get("name"),
                     text=item["text"],
                     chunk_metadata=dict(meta),
-                    embedding=vecs[idx],
+                    embedding=list(vecs[idx]),
                 )
             )
 
@@ -164,19 +291,45 @@ def query(q: str, k: int = 5, user_id: Optional[str] = None) -> List[Dict[str, A
     session = _get_session()
     normalized_user = _normalize_user(user_id)
     try:
-        distance = DocChunk.embedding.l2_distance(query_vec)
-        stmt = (
-            select(
-                DocChunk.id,
-                DocChunk.text,
-                DocChunk.chunk_metadata,
-                distance.label("distance"),
+        if _is_postgres_session(session):
+            distance = DocChunk.embedding.l2_distance(query_vec)
+            stmt = (
+                select(
+                    DocChunk.id,
+                    DocChunk.text,
+                    DocChunk.chunk_metadata,
+                    distance.label("distance"),
+                )
+                .where(DocChunk.user_id == normalized_user)
+                .order_by(distance)
+                .limit(k)
             )
-            .where(DocChunk.user_id == normalized_user)
-            .order_by(distance)
-            .limit(k)
-        )
-        rows = session.execute(stmt).all()
+            rows = session.execute(stmt).all()
+        else:
+            stmt = (
+                select(
+                    DocChunk.id,
+                    DocChunk.text,
+                    DocChunk.chunk_metadata,
+                    DocChunk.embedding,
+                )
+                .where(DocChunk.user_id == normalized_user)
+            )
+            results = session.execute(stmt).all()
+            scored: List[Tuple[float, Any]] = []
+            for row in results:
+                emb = _coerce_embedding(row.embedding)
+                scored.append((_l2_distance(query_vec, emb), row))
+            scored.sort(key=lambda tup: tup[0])
+            rows = [
+                SimpleNamespace(
+                    id=row.id,
+                    text=row.text,
+                    chunk_metadata=row.chunk_metadata,
+                    distance=dist,
+                )
+                for dist, row in scored[:k]
+            ]
     finally:
         session.close()
 

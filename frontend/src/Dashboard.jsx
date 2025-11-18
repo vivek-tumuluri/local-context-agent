@@ -48,7 +48,7 @@ export default function Dashboard() {
     try {
       const payload = {
         query: "",
-        max_files: 100,
+        max_files: 5,
         reembed_all: false,
       };
       const job = await apiPost("/ingest/drive/start", payload, csrfToken);

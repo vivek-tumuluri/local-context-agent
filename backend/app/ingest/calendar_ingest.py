@@ -7,7 +7,7 @@ from app.core.db import get_db
 from app.core.runtime import ensure_writes_enabled
 from app.core.auth import csrf_protect, get_current_user, get_google_credentials_for_user
 from app.rag.chunk import chunk_text
-from app.rag.vector import upsert as upsert_chunks
+from app.rag.vector_store import upsert as upsert_chunks
 
 router = APIRouter(prefix="/ingest/calendar", tags=["ingest"])
 

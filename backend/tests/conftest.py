@@ -3,15 +3,14 @@ from __future__ import annotations
 import base64
 import os
 import socket
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Generator, Iterable, Tuple
+from typing import Generator, Iterable
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 # Configure deterministic env before app modules import.
@@ -22,8 +21,6 @@ os.environ.setdefault("SESSION_SECRET", "test-session-secret-value-that-is-long-
 if "DRIVE_CREDENTIALS_KEY" not in os.environ:
     os.environ["DRIVE_CREDENTIALS_KEY"] = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
-_chroma_tmp = tempfile.mkdtemp(prefix="lca-chroma-")
-os.environ.setdefault("CHROMA_DIR", _chroma_tmp)
 
 from app.core import auth as auth_module
 from app.core import db as app_db
@@ -33,8 +30,9 @@ from app.routes import ingest_routes
 from app.ingest import drive_ingest
 from app.routes import jobs as jobs_routes
 from app.rag import vector_store as vector_module
+from app.rag import vector_pg
 from app.routes import rag_routes
-from tests.fakes import FakeChromaClient, FakeEmbeddingsClient, FakeChatCompletions
+from tests.fakes import FakeEmbeddingsClient, FakeChatCompletions
 
 _ORIGINAL_GET_CURRENT_USER = auth_module.get_current_user
 
@@ -139,20 +137,44 @@ async def api_client(session_factory, test_user):
 
 
 @pytest.fixture()
-def fake_vector_env(monkeypatch) -> Tuple[FakeChromaClient, FakeEmbeddingsClient]:
-    fake_client = FakeChromaClient()
+def fake_vector_env(monkeypatch, session_factory) -> FakeEmbeddingsClient:
     embeddings = FakeEmbeddingsClient()
+    dim = vector_pg.EMBED_DIM
 
-    backend_impl = vector_module.BACKEND
-    monkeypatch.setattr(backend_impl, "_collection_cache", {})
-    monkeypatch.setattr(backend_impl, "_chroma", fake_client)
-    monkeypatch.setattr(backend_impl, "_db", lambda: fake_client, raising=False)
-    monkeypatch.setattr(backend_impl, "_client", SimpleNamespace(embeddings=embeddings), raising=False)
-    monkeypatch.setattr(backend_impl.time, "sleep", lambda *_: None, raising=False)
+    def _fake_embed(texts):
+        while True:
+            try:
+                resp = embeddings.create(texts, model=vector_pg.EMBED_MODEL)
+                break
+            except Exception as exc:
+                s = str(exc).lower()
+                if "rate limit" in s or "429" in s:
+                    continue
+                raise
+        out = []
+        for item in resp.data:
+            vec = list(item.embedding)[:dim]
+            if len(vec) < dim:
+                vec.extend([0.0] * (dim - len(vec)))
+            out.append(vec)
+        return out
 
-    yield fake_client, embeddings
+    for backend_impl in (vector_pg, vector_module.BACKEND):
+        monkeypatch.setattr(backend_impl, "_client", SimpleNamespace(embeddings=embeddings), raising=False)
+        monkeypatch.setattr(backend_impl, "_embed_with_retry", _fake_embed, raising=False)
+        monkeypatch.setattr(backend_impl, "SessionLocal", session_factory, raising=False)
+        monkeypatch.setattr(backend_impl.time, "sleep", lambda *_: None, raising=False)
+    monkeypatch.setattr(vector_module, "_embed_with_retry", _fake_embed, raising=False)
 
-    backend_impl.shutdown()
+    # ensure clean table
+    session = session_factory()
+    session.execute(text("DELETE FROM doc_chunks"))
+    session.commit()
+    session.close()
+
+    yield embeddings
+
+    vector_pg.clear_user(None)
 
 
 @pytest.fixture()
