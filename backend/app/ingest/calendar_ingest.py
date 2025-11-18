@@ -1,4 +1,6 @@
 import datetime as dt
+from typing import Dict, List
+
 from fastapi import APIRouter, Depends
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
@@ -10,6 +12,46 @@ from app.rag.chunk import chunk_text
 from app.rag.vector_store import upsert as upsert_chunks
 
 router = APIRouter(prefix="/ingest/calendar", tags=["ingest"])
+
+
+def get_upcoming_events(db: Session, user_id: str, hours: int = 24) -> List[Dict[str, str]]:
+    """
+    Fetch upcoming primary calendar events for the next `hours`.
+    """
+    creds = get_google_credentials_for_user(db, user_id)
+    svc = build("calendar", "v3", credentials=creds)
+
+    now = dt.datetime.utcnow()
+    time_min = now.isoformat() + "Z"
+    time_max = (now + dt.timedelta(hours=max(1, hours))).isoformat() + "Z"
+
+    events = (
+        svc.events()
+        .list(
+            calendarId="primary",
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy="startTime",
+        )
+        .execute()
+        .get("items", [])
+    )
+
+    normalized: List[Dict[str, str]] = []
+    for e in events:
+        normalized.append(
+            {
+                "id": e.get("id"),
+                "title": e.get("summary") or "(no title)",
+                "description": e.get("description") or "",
+                "location": e.get("location") or "",
+                "start": e.get("start", {}).get("dateTime") or e.get("start", {}).get("date"),
+                "end": e.get("end", {}).get("dateTime") or e.get("end", {}).get("date"),
+            }
+        )
+    return normalized
+
 
 @router.post("")
 def ingest_calendar(

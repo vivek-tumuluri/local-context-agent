@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "./AuthContext";
-import { apiGet, apiPost } from "./api";
+import { apiGet, apiPost, fetchRelevantNow } from "./api";
 
 const POLL_INTERVAL_MS = 3000;
 const TERMINAL_STATUSES = new Set(["completed", "completed_with_errors", "failed"]);
@@ -16,6 +16,24 @@ export default function Dashboard() {
   const [answerLoading, setAnswerLoading] = useState(false);
   const [chatHistory, setChatHistory] = useState([]);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [relevant, setRelevant] = useState([]);
+  const [relevantLoading, setRelevantLoading] = useState(false);
+  const [relevantError, setRelevantError] = useState(null);
+
+  const loadRelevantNow = async () => {
+    if (!user || !csrfToken) return;
+    setRelevantLoading(true);
+    setRelevantError(null);
+    try {
+      const data = await fetchRelevantNow(csrfToken);
+      setRelevant(data?.results || []);
+    } catch (err) {
+      console.error("Failed to load relevant now", err);
+      setRelevantError("Failed to load");
+    } finally {
+      setRelevantLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!driveJobId || !jobPolling) {
@@ -43,6 +61,10 @@ export default function Dashboard() {
       clearInterval(intervalId);
     };
   }, [driveJobId, jobPolling]);
+
+  useEffect(() => {
+    loadRelevantNow();
+  }, [user, csrfToken]);
 
   const handleDriveIngest = async () => {
     try {
@@ -241,8 +263,74 @@ export default function Dashboard() {
               {disconnecting ? "Disconnecting..." : "Disconnect / Delete my data"}
             </button>
           </div>
+
         </aside>
-      </div>
-    </main>
-  );
-}
+
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h3 className="card-title">Relevant Now</h3>
+              <p className="card-subtext">Upcoming events and suggested docs.</p>
+            </div>
+            <button className="btn btn-secondary" onClick={loadRelevantNow} disabled={relevantLoading || !user}>
+              {relevantLoading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+
+          {relevantLoading && <p className="placeholder">Loading...</p>}
+          {relevantError && <p className="error-text">{relevantError}</p>}
+          {!relevantLoading && !relevantError && (!relevant || relevant.length === 0) && (
+            <p className="placeholder">No upcoming events with suggestions.</p>
+          )}
+
+          {!relevantLoading && !relevantError && relevant && relevant.length > 0 && (
+            <div className="card-section" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              {relevant.slice(0, 5).map((item, idx) => (
+                <div key={idx} className="card-section" style={{ background: "rgba(12,19,32,0.8)" }}>
+                  <div>
+                    <div className="card-title" style={{ marginBottom: "0.25rem" }}>
+                      {item.event?.title || "(No title)"}
+                    </div>
+                    <div className="muted-line">
+                      {item.event?.start_time || ""}
+                      {item.event?.end_time ? ` – ${item.event.end_time}` : ""}
+                      {item.event?.location ? ` · ${item.event.location}` : ""}
+                    </div>
+                    {item.event?.description && (
+                      <p className="placeholder" style={{ marginTop: "0.35rem" }}>
+                        {item.event.description.slice(0, 280)}
+                        {item.event.description.length > 280 ? "…" : ""}
+                      </p>
+                    )}
+                  </div>
+                  {(item.docs || []).slice(0, 3).map((doc, dIdx) => (
+                    <div key={dIdx} className="card-section" style={{ marginTop: "0.75rem" }}>
+                      <div className="card-title" style={{ fontSize: "1rem" }}>
+                        {doc.link ? (
+                          <a href={doc.link} target="_blank" rel="noreferrer">
+                            {doc.title || "Untitled"}
+                          </a>
+                        ) : (
+                          doc.title || "Untitled"
+                        )}
+                      </div>
+                      {doc.snippet && (
+                        <p className="placeholder" style={{ marginTop: "0.3rem" }}>
+                          {doc.snippet.slice(0, 240)}
+                          {doc.snippet.length > 240 ? "…" : ""}
+                        </p>
+                      )}
+                      {doc.score !== undefined && (
+                        <div className="muted-line">score: {doc.score}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+       </div>
+     </main>
+   );
+ }

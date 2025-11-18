@@ -12,6 +12,7 @@ from app.routes import (
     rag_router,
     health_router,
     jobs_router,
+    relevant_router,
 )
 from app.ingest.drive_ingest import router as drive_router
 from app.ingest.calendar_ingest import router as calendar_router
@@ -41,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(rag_router)
     app.include_router(health_router)
     app.include_router(jobs_router)
+    app.include_router(relevant_router)
 
     @app.middleware("http")
     async def request_logging(request: Request, call_next):

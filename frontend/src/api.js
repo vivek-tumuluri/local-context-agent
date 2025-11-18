@@ -14,10 +14,15 @@ async function handleResponse(response) {
   throw new Error(`${response.status}: ${message}`);
 }
 
-export async function apiGet(path) {
+export async function apiGet(path, csrfToken) {
+  const headers = {};
+  if (csrfToken) {
+    headers["X-CSRF-Token"] = csrfToken;
+  }
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "GET",
     credentials: "include",
+    headers,
   });
   return handleResponse(response);
 }
@@ -37,4 +42,8 @@ export async function apiPost(path, body, csrfToken) {
     body: JSON.stringify(body ?? {}),
   });
   return handleResponse(response);
+}
+
+export async function fetchRelevantNow(csrfToken) {
+  return apiGet("/relevant/now", csrfToken);
 }
