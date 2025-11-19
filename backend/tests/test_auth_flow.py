@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
+import importlib
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -11,7 +13,7 @@ from google.oauth2.credentials import Credentials
 
 from app.core import auth
 from app.core import db as app_db
-from app.core.models import Base, User
+from app.core.models import Base, User, DriveSession
 
 
 class DummyRequest:
@@ -101,3 +103,44 @@ def test_google_credentials_round_trip(db_session, session_factory):
 
     unmanaged = auth.get_google_credentials_for_user_unmanaged(user.id)
     assert unmanaged.token == "token-123"
+
+
+def test_google_credentials_encrypted_when_key_set(db_session, session_factory, monkeypatch):
+    # Ensure a known key and reload auth to pick it up
+    key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+    monkeypatch.setenv("DRIVE_CREDENTIALS_KEY", key)
+    import app.core.auth as auth_module
+    importlib.reload(auth_module)
+
+    user = _create_user(db_session)
+    creds = Credentials(
+        token="token-xyz",
+        refresh_token=None,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id="c",
+        client_secret="s",
+        scopes=["openid"],
+    )
+    auth_module._persist_google_credentials(db_session, user.id, creds)
+    row = db_session.get(DriveSession, user.id)
+    assert row is not None
+    # Stored credentials should be encrypted (ciphertext key present)
+    assert isinstance(row.credentials, dict)
+    assert "ciphertext" in row.credentials
+    # Round-trip via managed getter
+    loaded = auth_module.get_google_credentials_for_user(db_session, user.id)
+    assert loaded.token == "token-xyz"
+
+
+def test_non_local_requires_drive_key(monkeypatch):
+    import app.core.settings as settings
+
+    monkeypatch.setenv("DRIVE_CREDENTIALS_KEY", "")
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    with pytest.raises(RuntimeError):
+        importlib.reload(settings)
+
+    # restore local defaults for other tests
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("DRIVE_CREDENTIALS_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    importlib.reload(settings)

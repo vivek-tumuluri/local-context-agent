@@ -56,3 +56,8 @@ def test_embed_with_retry_bubbles_non_rate_limit_errors(fake_vector_env):
 def test_healthcheck_reports_ok(fake_vector_env):
     result = vector.healthcheck(user_id="user-99")
     assert result["status"] == "ok"
+
+
+def test_vec_query_requires_user_id(fake_vector_env):
+    with pytest.raises(ValueError):
+        vector.query("test", k=1, user_id=None)  # type: ignore[arg-type]

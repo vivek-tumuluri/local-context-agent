@@ -16,6 +16,9 @@ async def test_start_drive_ingest_creates_job(api_client, db_session, monkeypatc
 
     monkeypatch.setattr(ingest_routes, "_run_drive_job", fake_run)
     monkeypatch.setattr(ingest_routes, "ENSURE_DRIVE_SESSION", lambda user_id: None)
+    monkeypatch.setattr(ingest_routes.settings, "ALLOW_INLINE_INGEST", True, raising=False)
+    monkeypatch.setattr(ingest_routes.ingest_queue, "queue_enabled", lambda: False, raising=False)
+    monkeypatch.setattr(ingest_routes.ingest_queue, "INGEST_QUEUE", None, raising=False)
 
     resp = await api_client.post("/ingest/drive/start", json={"max_files": 2, "reembed_all": False})
     assert resp.status_code == 200, resp.text

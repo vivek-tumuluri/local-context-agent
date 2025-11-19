@@ -19,6 +19,8 @@ def reload_auth():
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+        import app.core.settings as settings
+        importlib.reload(settings)
         importlib.reload(auth_module)
         return auth_module
 

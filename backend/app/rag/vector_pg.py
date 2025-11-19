@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.db import SessionLocal
 from app.core.models import DocChunk
 from app.rag.embedding_config import EMBED_DIM, EMBED_MODEL
+from app.core.settings import ENVIRONMENT
 
 log = logging.getLogger("vector_pg")
 BACKEND_NAME = "pgvector"
@@ -120,6 +121,15 @@ def _is_postgres_session(session: Session) -> bool:
         return False
 
 
+def _assert_postgres(session: Session) -> None:
+    try:
+        dialect_name = session.get_bind().dialect.name  # type: ignore[union-attr]
+    except Exception:
+        dialect_name = None
+    if ENVIRONMENT != "local" and dialect_name != "postgresql":
+        raise RuntimeError("Vector operations require Postgres + pgvector when ENVIRONMENT is not 'local'.")
+
+
 def _coerce_embedding(val: Any) -> List[float]:
     if isinstance(val, memoryview):
         try:
@@ -146,8 +156,10 @@ def _coerce_embedding(val: Any) -> List[float]:
     return []
 
 
-def _normalize_user(user_id: Optional[str]) -> str:
-    return user_id or "__public__"
+def _normalize_user(user_id: str) -> str:
+    if not user_id:
+        raise ValueError("user_id is required for vector operations")
+    return user_id
 
 
 def _get_session() -> Session:
@@ -155,7 +167,7 @@ def _get_session() -> Session:
 
 
 class _PgCollection:
-    def __init__(self, user_id: Optional[str]) -> None:
+    def __init__(self, user_id: str) -> None:
         self.user_id = _normalize_user(user_id)
 
     def upsert(
@@ -170,6 +182,7 @@ class _PgCollection:
             return
         session = _get_session()
         try:
+            _assert_postgres(session)
             session.execute(
                 delete(DocChunk).where(
                     DocChunk.user_id == self.user_id,
@@ -200,7 +213,7 @@ class _PgCollection:
             session.close()
 
 
-def _col(user_id: Optional[str] = None, name: Optional[str] = None) -> _PgCollection:
+def _col(user_id: str, name: Optional[str] = None) -> _PgCollection:
     return _PgCollection(user_id)
 
 
@@ -225,7 +238,7 @@ def _prepare_batch(batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return prepared
 
 
-def upsert(chunks: List[Dict[str, Any]], user_id: Optional[str] = None) -> Dict[str, Any]:
+def upsert(chunks: List[Dict[str, Any]], user_id: str) -> Dict[str, Any]:
     summary = {"batches": 0, "added": 0, "errors": 0, "ids": []}
     if not chunks:
         return summary
@@ -283,14 +296,15 @@ def upsert(chunks: List[Dict[str, Any]], user_id: Optional[str] = None) -> Dict[
     return summary
 
 
-def query(q: str, k: int = 5, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def query(q: str, user_id: str, k: int = 5) -> List[Dict[str, Any]]:
+    normalized_user = _normalize_user(user_id)
     vecs = _embed_with_retry([q])
     if not vecs:
         return []
     query_vec = vecs[0]
     session = _get_session()
-    normalized_user = _normalize_user(user_id)
     try:
+        _assert_postgres(session)
         if _is_postgres_session(session):
             distance = DocChunk.embedding.l2_distance(query_vec)
             stmt = (
@@ -350,10 +364,11 @@ def query(q: str, k: int = 5, user_id: Optional[str] = None) -> List[Dict[str, A
     return out
 
 
-def delete_by_doc_id(doc_id: str, user_id: Optional[str] = None) -> Dict[str, int]:
+def delete_by_doc_id(doc_id: str, user_id: str) -> Dict[str, int]:
     session = _get_session()
     normalized_user = _normalize_user(user_id)
     try:
+        _assert_postgres(session)
         result = session.execute(
             delete(DocChunk).where(
                 DocChunk.user_id == normalized_user,
@@ -370,10 +385,11 @@ def delete_by_doc_id(doc_id: str, user_id: Optional[str] = None) -> Dict[str, in
         session.close()
 
 
-def list_doc_chunk_ids(doc_id: str, user_id: Optional[str] = None) -> List[str]:
+def list_doc_chunk_ids(doc_id: str, user_id: str) -> List[str]:
     session = _get_session()
     normalized_user = _normalize_user(user_id)
     try:
+        _assert_postgres(session)
         stmt = select(DocChunk.id).where(
             DocChunk.user_id == normalized_user,
             DocChunk.doc_id == doc_id,
@@ -383,12 +399,13 @@ def list_doc_chunk_ids(doc_id: str, user_id: Optional[str] = None) -> List[str]:
         session.close()
 
 
-def delete_ids(ids: List[str], user_id: Optional[str] = None) -> int:
+def delete_ids(ids: List[str], user_id: str) -> int:
     if not ids:
         return 0
     session = _get_session()
     normalized_user = _normalize_user(user_id)
     try:
+        _assert_postgres(session)
         result = session.execute(
             delete(DocChunk).where(
                 DocChunk.user_id == normalized_user,
@@ -405,21 +422,22 @@ def delete_ids(ids: List[str], user_id: Optional[str] = None) -> int:
         session.close()
 
 
-def reset_collection(user_id: Optional[str] = None, name: Optional[str] = None) -> None:
+def reset_collection(user_id: str, name: Optional[str] = None) -> None:
     clear_user(user_id)
 
 
-def clear_user(user_id: Optional[str]) -> None:
+def clear_user(user_id: str) -> None:
     session = _get_session()
     normalized_user = _normalize_user(user_id)
     try:
+        _assert_postgres(session)
         session.execute(delete(DocChunk).where(DocChunk.user_id == normalized_user))
         session.commit()
     finally:
         session.close()
 
 
-def healthcheck(user_id: Optional[str] = None) -> Dict[str, str]:
+def healthcheck(user_id: str) -> Dict[str, str]:
     session = _get_session()
     try:
         session.execute(select(DocChunk.id).limit(1))

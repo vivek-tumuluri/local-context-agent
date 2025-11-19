@@ -15,6 +15,7 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal, get_db
+from app.core.settings import SESSION_SECRET, DRIVE_CREDENTIALS_KEY, ENVIRONMENT
 from app.core.models import (
     ContentIndex,
     DriveSession,
@@ -31,14 +32,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-APP_ENV = os.getenv("APP_ENV", "development").lower()
-
-_raw_session_secret = os.getenv("SESSION_SECRET")
-if not _raw_session_secret or len(_raw_session_secret) < 32:
-    if APP_ENV != "development":
-        raise RuntimeError("SESSION_SECRET must be at least 32 chars outside development.")
-    _raw_session_secret = _raw_session_secret or "dev-secret"
-SESSION_SECRET = _raw_session_secret
+APP_ENV = os.getenv("APP_ENV", ENVIRONMENT).lower()
 
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "lc_session")
 SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
@@ -54,15 +48,12 @@ CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "lc_csrf")
 CSRF_HEADER_NAME = os.getenv("CSRF_HEADER_NAME", "X-CSRF-Token")
 STATE_SIGNER = URLSafeSerializer(SESSION_SECRET, salt="oauth-state")
 
-DRIVE_CREDENTIALS_KEY = os.getenv("DRIVE_CREDENTIALS_KEY")
 _fernet: Optional[Fernet] = None
 if DRIVE_CREDENTIALS_KEY:
     try:
         _fernet = Fernet(DRIVE_CREDENTIALS_KEY)
     except Exception as exc:
         raise RuntimeError("DRIVE_CREDENTIALS_KEY must be a valid Fernet key.") from exc
-elif APP_ENV != "development":
-    raise RuntimeError("DRIVE_CREDENTIALS_KEY is required outside development.")
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -94,6 +85,8 @@ def _serialize_credentials(creds: Credentials) -> Dict[str, Any]:
         "scopes": list(creds.scopes or []),
     }
     if not _fernet:
+        if ENVIRONMENT != "local":
+            raise RuntimeError("DRIVE_CREDENTIALS_KEY is required to persist credentials outside local environments.")
         return payload
     blob = json.dumps(payload).encode("utf-8")
     ciphertext = _fernet.encrypt(blob).decode("utf-8")

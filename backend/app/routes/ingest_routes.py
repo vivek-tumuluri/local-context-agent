@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 
 from app.ingest import job_helper, queue as ingest_queue
+from app.core import settings
 from app.core.limits import check_ingest_quota
 from app.core.runtime import ensure_writes_enabled
 from app.core.auth import csrf_protect, get_current_user
@@ -166,10 +167,16 @@ def start_drive_ingest(
         "reembed_all": body.reembed_all,
     }
     response = {"job_id": job_id, "status": "queued", "queue_job_id": None, "existing": False}
-    if ingest_queue.queue_enabled():
+    queue_ok = ingest_queue.queue_enabled()
+    if queue_ok:
         rq_id = ingest_queue.enqueue_drive_job(job_id, payload=payload)
         response["queue_job_id"] = rq_id
         return response
+    if not settings.ALLOW_INLINE_INGEST:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingestion service temporarily unavailable (queue offline).",
+        )
     _run_drive_job(job_id)
     latest = job_helper.get_job(db, job_id)
     if latest:

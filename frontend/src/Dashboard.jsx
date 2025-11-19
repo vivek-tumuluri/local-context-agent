@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [relevant, setRelevant] = useState([]);
   const [relevantLoading, setRelevantLoading] = useState(false);
   const [relevantError, setRelevantError] = useState(null);
+  const [ingestError, setIngestError] = useState(null);
 
   const loadRelevantNow = async () => {
     if (!user || !csrfToken) return;
@@ -73,6 +74,7 @@ export default function Dashboard() {
         max_files: 5,
         reembed_all: false,
       };
+      setIngestError(null);
       const job = await apiPost("/ingest/drive/start", payload, csrfToken);
       if (job && job.job_id) {
         setDriveJobId(job.job_id);
@@ -83,7 +85,11 @@ export default function Dashboard() {
       }
     } catch (err) {
       console.error("Drive ingest failed", err);
-      alert("Drive ingest failed. Check backend logs.");
+      if (err?.message?.includes("503")) {
+        setIngestError("Ingestion is temporarily unavailable – worker offline. Please try again later.");
+      } else {
+        setIngestError("Drive ingest failed. Check backend logs.");
+      }
     }
   };
 
@@ -250,6 +256,7 @@ export default function Dashboard() {
           ) : (
             <p className="placeholder muted-line">No ingestion job yet. Start a run to index your Drive files.</p>
           )}
+          {ingestError && <div className="error-text">{ingestError}</div>}
 
           <div className="ingest-actions">
             <button className="btn btn-primary" onClick={handleDriveIngest} disabled={driveJob && driveJob.status === "running"}>
