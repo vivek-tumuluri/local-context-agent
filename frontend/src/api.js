@@ -47,3 +47,7 @@ export async function apiPost(path, body, csrfToken) {
 export async function fetchRelevantNow(csrfToken) {
   return apiGet("/relevant/now", csrfToken);
 }
+
+export async function fetchIngestJobs(csrfToken) {
+  return apiGet("/ingest/jobs", csrfToken);
+}

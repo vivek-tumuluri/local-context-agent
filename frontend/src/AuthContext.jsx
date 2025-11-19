@@ -54,7 +54,12 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  const value = { user, csrfToken, loading, refreshAuth };
+  const isDriveConnected =
+    !!(user?.has_drive_session ?? user?.has_drive_credentials ?? user?.drive_connected ?? user?.drive_ready);
+  const isCalendarConnected =
+    !!(user?.has_calendar_session ?? user?.has_calendar_credentials ?? user?.calendar_connected ?? user?.calendar_ready);
+
+  const value = { user, csrfToken, loading, refreshAuth, isDriveConnected, isCalendarConnected };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
