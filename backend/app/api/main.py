@@ -16,6 +16,7 @@ from app.routes import (
 )
 from app.ingest.drive_ingest import router as drive_router
 from app.ingest.calendar_ingest import router as calendar_router
+from app.core.settings import ENVIRONMENT
 
 
 load_dotenv()
@@ -36,7 +37,9 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(auth_router)
-    app.include_router(drive_router)
+    # Inline ingest router is only exposed for local development; production uses queue-only ingest.
+    if ENVIRONMENT == "local":
+        app.include_router(drive_router)
     app.include_router(calendar_router)
     app.include_router(ingest_router)
     app.include_router(rag_router)

@@ -54,6 +54,8 @@ if DRIVE_CREDENTIALS_KEY:
         _fernet = Fernet(DRIVE_CREDENTIALS_KEY)
     except Exception as exc:
         raise RuntimeError("DRIVE_CREDENTIALS_KEY must be a valid Fernet key.") from exc
+elif ENVIRONMENT != "local":
+    raise RuntimeError("DRIVE_CREDENTIALS_KEY must be set when ENVIRONMENT is not 'local'.")
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -81,7 +83,6 @@ def _serialize_credentials(creds: Credentials) -> Dict[str, Any]:
         "refresh_token": creds.refresh_token,
         "token_uri": creds.token_uri,
         "client_id": creds.client_id,
-        "client_secret": creds.client_secret,
         "scopes": list(creds.scopes or []),
     }
     if not _fernet:
@@ -203,6 +204,8 @@ def _extract_session_token(request: Request) -> Optional[str]:
     header_token = None
     if authz.lower().startswith("bearer "):
         header_token = authz.split(" ", 1)[1].strip()
+        if ENVIRONMENT != "local":
+            raise HTTPException(status_code=401, detail="Bearer auth not allowed in this environment")
     return cookie or header_token
 
 
@@ -305,12 +308,13 @@ def _clear_session_state(response: Response) -> None:
 
 def _build_credentials(data: Dict[str, Any]) -> Credentials:
     decoded = _deserialize_credentials(data or {})
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
     return Credentials(
         token=decoded.get("token"),
         refresh_token=decoded.get("refresh_token"),
         token_uri=decoded.get("token_uri"),
         client_id=decoded.get("client_id"),
-        client_secret=decoded.get("client_secret"),
+        client_secret=client_secret,
         scopes=decoded.get("scopes"),
     )
 
@@ -398,14 +402,37 @@ def me(
     request: Request,
     response: Response,
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     csrf_token = ensure_csrf_cookie(request, response)
+    has_drive_session = db.query(DriveSession).filter(DriveSession.user_id == user.id).first() is not None
+    has_drive_content = (
+        db.query(ContentIndex)
+        .filter(ContentIndex.user_id == user.id, ContentIndex.source == "drive")
+        .first()
+        is not None
+    )
+    has_calendar_content = (
+        db.query(ContentIndex)
+        .filter(ContentIndex.user_id == user.id, ContentIndex.source == "calendar")
+        .first()
+        is not None
+    )
     return {
         "user": {
             "id": user.id,
             "email": user.email,
             "full_name": user.full_name,
             "picture": user.picture,
+            # Existing frontend flags for drive/calendar connection and readiness.
+            "has_drive_session": has_drive_session,
+            "has_drive_credentials": has_drive_session,
+            "drive_connected": has_drive_session,
+            "drive_ready": has_drive_content,
+            "has_calendar_session": has_calendar_content,
+            "has_calendar_credentials": has_calendar_content,
+            "calendar_connected": has_calendar_content,
+            "calendar_ready": has_calendar_content,
         },
         "csrf_token": csrf_token,
     }

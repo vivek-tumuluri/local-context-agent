@@ -169,8 +169,10 @@ export default function Dashboard() {
         const data = await apiGet(`/ingest/jobs/${driveJobId}`);
         if (!cancelled && data) {
           setDriveJob(data);
-          if (data.status && TERMINAL_STATUSES.has(data.status)) {
+          const status = (data.status || "").toLowerCase();
+          if (status && TERMINAL_STATUSES.has(status)) {
             setJobPolling(false);
+            refreshAuth()?.catch(() => {});
           }
         }
       } catch (err) {
@@ -189,7 +191,8 @@ export default function Dashboard() {
   }, [user, csrfToken]);
 
   useEffect(() => {
-    if (driveJob?.status && TERMINAL_STATUSES.has(driveJob.status)) {
+    const status = (driveJob?.status || "").toLowerCase();
+    if (status && TERMINAL_STATUSES.has(status)) {
       reloadIngestStatus();
     }
   }, [driveJob?.status, reloadIngestStatus]);
@@ -280,6 +283,15 @@ export default function Dashboard() {
   if (!user) {
     return <p className="loading">No user loaded.</p>;
   }
+
+  const effectiveDriveStatus = useMemo(() => {
+    const ready = !!(user?.drive_ready);
+    const base = driveStatus || { label: "Not synced yet", code: "none" };
+    if (base.code === "running") return base;
+    if (base.code === "failed") return base;
+    if (ready) return { label: "Synced", code: "succeeded" };
+    return base;
+  }, [driveStatus, user]);
 
   const initials = (user.full_name || user.email || "")
     .split(" ")
@@ -395,7 +407,7 @@ export default function Dashboard() {
           {renderSourcesCard({
             title: "Google Drive",
             connected: isDriveConnected,
-            status: driveStatus,
+            status: effectiveDriveStatus,
             job: lastDriveJob,
             onRunIngest: handleDriveIngest,
             onViewHistory: () => setActiveSection("activity"),
@@ -447,7 +459,7 @@ export default function Dashboard() {
           <div className="card-title">Data sources</div>
           <div className="card-subtitle">Manage ingest and connectivity.</div>
         </div>
-        <span className={statusPillClass(driveStatus.code)}>{driveStatus.label}</span>
+        <span className={statusPillClass(effectiveDriveStatus.code)}>{effectiveDriveStatus.label}</span>
       </div>
 
       {ingestError && <div style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "6px" }}>{ingestError}</div>}
@@ -455,14 +467,14 @@ export default function Dashboard() {
       <div className="data-source-block">
         <div className="data-source-header">
           <span>Google Drive</span>
-          <span className={statusPillClass(driveStatus.code)}>{driveStatus.label}</span>
+          <span className={statusPillClass(effectiveDriveStatus.code)}>{effectiveDriveStatus.label}</span>
         </div>
         <div className="text-muted">
           {lastDriveJob ? `Last run ${formatTimestamp(lastDriveJob.created_at || lastDriveJob.started_at)}. ${formatJobMeta(lastDriveJob)}` : "Not synced yet. Start a run to ingest your Drive."}
         </div>
         <div style={{ marginTop: "8px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button className="button-primary" onClick={handleDriveIngest} disabled={driveStatus.code === "running"}>
-            {driveStatus.code === "running" ? "Syncing..." : "Run Drive ingest"}
+          <button className="button-primary" onClick={handleDriveIngest} disabled={effectiveDriveStatus.code === "running"}>
+            {effectiveDriveStatus.code === "running" ? "Syncing..." : "Run Drive ingest"}
           </button>
           <button className="button-secondary" onClick={handleDisconnect} disabled={disconnecting}>
             {disconnecting ? "Disconnecting..." : "Disconnect / Delete my data"}
@@ -487,7 +499,7 @@ export default function Dashboard() {
           <div className="card-title">Activity</div>
           <div className="card-subtitle">Latest ingest summary.</div>
         </div>
-        <span className={statusPillClass(driveStatus.code)}>{driveStatus.label}</span>
+        <span className={statusPillClass(effectiveDriveStatus.code)}>{effectiveDriveStatus.label}</span>
       </div>
       {jobsLoading && <div className="text-muted">Loading activity…</div>}
       {jobsError && <div style={{ color: "var(--danger)", fontSize: "0.85rem" }}>Error loading activity</div>}

@@ -17,6 +17,7 @@ from app.core.auth import (
     get_google_credentials_for_user,
     get_google_credentials_for_user_unmanaged,
 )
+from app.core.settings import ENVIRONMENT
 from .drive_pipeline import (
     run_drive_ingest_once,
     load_drive_cursor,
@@ -102,6 +103,9 @@ def ingest_drive_endpoint(
     db: Session = Depends(get_db),
     _csrf=Depends(csrf_protect),
 ):
+    # Inline endpoint is only reachable in local environments; non-local callers get a hard 404/403.
+    if ENVIRONMENT != "local":
+        raise HTTPException(status_code=404, detail="Endpoint not available in this environment")
     creds = get_google_credentials_for_user(db, user.user_id)
     svc = _drive_service(creds)
     list_page = _list_page_factory(svc, name_contains)
