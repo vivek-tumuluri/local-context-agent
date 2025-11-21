@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import json
-import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -15,7 +14,6 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal, get_db
-from app.core.settings import SESSION_SECRET, DRIVE_CREDENTIALS_KEY, ENVIRONMENT
 from app.core.models import (
     ContentIndex,
     DriveSession,
@@ -24,38 +22,31 @@ from app.core.models import (
     User,
     UserSession,
 )
+from app.core.runtime import ensure_writes_enabled
+from app.core.settings import settings
 from app.integrations.google_clients import build_flow
 from app.rag import vector_store as vector
-from app.core.runtime import ensure_writes_enabled
 
 from cryptography.fernet import Fernet, InvalidToken
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-APP_ENV = os.getenv("APP_ENV", ENVIRONMENT).lower()
-
-SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "lc_session")
-SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
-SESSION_COOKIE_SECURE = os.getenv(
-    "SESSION_COOKIE_SECURE",
-    "0" if APP_ENV == "development" else "1",
-) == "1"
-SESSION_COOKIE_SAMESITE = os.getenv(
-    "SESSION_COOKIE_SAMESITE",
-    "lax" if APP_ENV == "development" else "strict",
-)
-CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "lc_csrf")
-CSRF_HEADER_NAME = os.getenv("CSRF_HEADER_NAME", "X-CSRF-Token")
-STATE_SIGNER = URLSafeSerializer(SESSION_SECRET, salt="oauth-state")
+SESSION_COOKIE_NAME = settings.session_cookie_name
+SESSION_TTL_DAYS = settings.session_ttl_days
+SESSION_COOKIE_SECURE = settings.session_cookie_secure
+SESSION_COOKIE_SAMESITE = settings.session_cookie_samesite
+CSRF_COOKIE_NAME = settings.csrf_cookie_name
+CSRF_HEADER_NAME = settings.csrf_header_name
+STATE_SIGNER = URLSafeSerializer(settings.session_secret, salt="oauth-state")
 
 _fernet: Optional[Fernet] = None
-if DRIVE_CREDENTIALS_KEY:
+if settings.drive_credentials_key:
     try:
-        _fernet = Fernet(DRIVE_CREDENTIALS_KEY)
+        _fernet = Fernet(settings.drive_credentials_key)
     except Exception as exc:
         raise RuntimeError("DRIVE_CREDENTIALS_KEY must be a valid Fernet key.") from exc
-elif ENVIRONMENT != "local":
-    raise RuntimeError("DRIVE_CREDENTIALS_KEY must be set when ENVIRONMENT is not 'local'.")
+elif settings.is_prod_like:
+    raise RuntimeError("DRIVE_CREDENTIALS_KEY must be set when ENV is not 'local'.")
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -86,7 +77,7 @@ def _serialize_credentials(creds: Credentials) -> Dict[str, Any]:
         "scopes": list(creds.scopes or []),
     }
     if not _fernet:
-        if ENVIRONMENT != "local":
+        if settings.is_prod_like:
             raise RuntimeError("DRIVE_CREDENTIALS_KEY is required to persist credentials outside local environments.")
         return payload
     blob = json.dumps(payload).encode("utf-8")
@@ -204,7 +195,7 @@ def _extract_session_token(request: Request) -> Optional[str]:
     header_token = None
     if authz.lower().startswith("bearer "):
         header_token = authz.split(" ", 1)[1].strip()
-        if ENVIRONMENT != "local":
+        if settings.is_prod_like:
             raise HTTPException(status_code=401, detail="Bearer auth not allowed in this environment")
     return cookie or header_token
 
@@ -308,7 +299,7 @@ def _clear_session_state(response: Response) -> None:
 
 def _build_credentials(data: Dict[str, Any]) -> Credentials:
     decoded = _deserialize_credentials(data or {})
-    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    client_secret = settings.google_client_secret
     return Credentials(
         token=decoded.get("token"),
         refresh_token=decoded.get("refresh_token"),
@@ -362,7 +353,7 @@ def get_google_credentials_for_user_unmanaged(user_id: str) -> Credentials:
 def start_google_auth():
     ensure_writes_enabled()
     flow = build_flow()
-    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI")
+    flow.redirect_uri = settings.oauth_redirect_uri
     state_payload = {"nonce": secrets.token_urlsafe(16)}
     state = STATE_SIGNER.dumps(state_payload)
     auth_url, _ = flow.authorization_url(
@@ -383,7 +374,7 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid OAuth state") from exc
 
     flow = build_flow()
-    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI")
+    flow.redirect_uri = settings.oauth_redirect_uri
     flow.fetch_token(code=code)
     creds = flow.credentials
     profile = _fetch_profile(creds)

@@ -8,11 +8,12 @@ from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutErr
 from rq import Queue, Retry, get_current_job
 
 from app.core import db as app_db
-from app.ingest import drive_ingest, job_helper
 from app.core.logging_utils import log_event
+from app.core.settings import settings
+from app.ingest import drive_ingest, job_helper
 
 
-_redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+_redis_url = settings.redis_url or "redis://localhost:6379/0"
 _redis_conn: Optional[Redis] = None
 try:
     candidate = from_url(_redis_url)

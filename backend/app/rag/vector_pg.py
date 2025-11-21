@@ -15,8 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
 from app.core.models import DocChunk
+from app.core.settings import settings
 from app.rag.embedding_config import EMBED_DIM, EMBED_MODEL
-from app.core.settings import ENVIRONMENT
 
 log = logging.getLogger("vector_pg")
 BACKEND_NAME = "pgvector"
@@ -26,12 +26,12 @@ DEFAULT_MAX_CHARS_PER_CHUNK = 3000
 DEFAULT_MAX_RETRIES = 6
 DEFAULT_BASE_BACKOFF = 0.6
 
-BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", str(DEFAULT_EMBED_BATCH_SIZE)))
+BATCH_SIZE = settings.embed_batch_size or DEFAULT_EMBED_BATCH_SIZE
 MAX_CHARS_PER_CHUNK = int(os.getenv("MAX_CHARS_PER_CHUNK", str(DEFAULT_MAX_CHARS_PER_CHUNK)))
-MAX_RETRIES = int(os.getenv("EMBED_MAX_RETRIES", str(DEFAULT_MAX_RETRIES)))
-BASE_BACKOFF = float(os.getenv("EMBED_BASE_BACKOFF", str(DEFAULT_BASE_BACKOFF)))
+MAX_RETRIES = settings.embed_max_retries or DEFAULT_MAX_RETRIES
+BASE_BACKOFF = settings.embed_base_backoff or DEFAULT_BASE_BACKOFF
 
-_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_client = OpenAI(api_key=settings.openai_api_key)
 _retry_after_re = re.compile(r"try again in (\d+)\s*ms", re.IGNORECASE)
 
 
@@ -126,7 +126,7 @@ def _assert_postgres(session: Session) -> None:
         dialect_name = session.get_bind().dialect.name  # type: ignore[union-attr]
     except Exception:
         dialect_name = None
-    if ENVIRONMENT != "local" and dialect_name != "postgresql":
+    if settings.is_prod_like and dialect_name != "postgresql":
         raise RuntimeError("Vector operations require Postgres + pgvector when ENVIRONMENT is not 'local'.")
 
 

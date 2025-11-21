@@ -9,10 +9,12 @@ from sqlalchemy import pool
 from alembic import context
 
 BASE_DIR = pathlib.Path(__file__).resolve().parents[1]
-if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
+BACKEND_DIR = BASE_DIR / "backend"
+for p in (BASE_DIR, BACKEND_DIR):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 
-from app.models import Base
+from app.core.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

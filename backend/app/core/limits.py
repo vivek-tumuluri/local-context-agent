@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime
 from typing import Optional
 
@@ -11,11 +10,12 @@ from redis import Redis, from_url
 from redis.exceptions import RedisError
 
 from app.core.logging_utils import log_event
+from app.core.settings import settings
 
 log = logging.getLogger("limits")
 
 
-_redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+_redis_url = settings.redis_url or "redis://localhost:6379/0"
 _redis: Optional[Redis] = None
 
 
@@ -39,8 +39,8 @@ def _redis_conn() -> Optional[Redis]:
         return None
 
 
-MAX_INGESTS_PER_DAY = int(os.getenv("MAX_INGESTS_PER_USER_PER_DAY", "3"))
-MAX_RAG_REQUESTS_PER_DAY = int(os.getenv("MAX_RAG_REQUESTS_PER_DAY", "200"))
+MAX_INGESTS_PER_DAY = settings.max_ingests_per_day
+MAX_RAG_REQUESTS_PER_DAY = settings.max_rag_requests_per_day
 
 
 def _today() -> str:

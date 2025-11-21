@@ -10,14 +10,14 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 from sqlalchemy.orm import Session
 
-from app.core.db import get_db, SessionLocal
 from app.core.auth import (
     csrf_protect,
     get_current_user,
     get_google_credentials_for_user,
     get_google_credentials_for_user_unmanaged,
 )
-from app.core.settings import ENVIRONMENT
+from app.core.db import SessionLocal, get_db
+from app.core.settings import settings
 from .drive_pipeline import (
     run_drive_ingest_once,
     load_drive_cursor,
@@ -104,7 +104,7 @@ def ingest_drive_endpoint(
     _csrf=Depends(csrf_protect),
 ):
     # Inline endpoint is only reachable in local environments; non-local callers get a hard 404/403.
-    if ENVIRONMENT != "local":
+    if settings.is_prod_like:
         raise HTTPException(status_code=404, detail="Endpoint not available in this environment")
     creds = get_google_credentials_for_user(db, user.user_id)
     svc = _drive_service(creds)

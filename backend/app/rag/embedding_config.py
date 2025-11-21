@@ -1,5 +1,5 @@
-import os
+from app.core.settings import settings
 
 
-EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
-EMBED_DIM = int(os.getenv("EMBED_DIM", "1536"))
+EMBED_MODEL = settings.embed_model
+EMBED_DIM = settings.embed_dim

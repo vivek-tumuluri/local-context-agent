@@ -107,9 +107,11 @@ def test_google_credentials_round_trip(db_session, session_factory):
 
 def test_google_credentials_encrypted_when_key_set(db_session, session_factory, monkeypatch):
     # Ensure a known key and reload auth to pick it up
-    key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+    key = "RjaLbvsu8b_3Nn-VsQJKhNz1Iv-pWQmERgUe0beTr0g="
     monkeypatch.setenv("DRIVE_CREDENTIALS_KEY", key)
     import app.core.auth as auth_module
+    import app.core.settings as settings
+    importlib.reload(settings)
     importlib.reload(auth_module)
 
     user = _create_user(db_session)

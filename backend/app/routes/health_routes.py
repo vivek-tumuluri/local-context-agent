@@ -2,13 +2,13 @@ import os
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
 from redis import from_url
 from redis.exceptions import RedisError
+from sqlalchemy import text
 
 from app.core.db import SessionLocal
-from app.core.settings import READ_ONLY_MODE
 from app.core.logging_utils import log_event
+from app.core.settings import READ_ONLY_MODE, settings
 from app.ingest import queue as ingest_queue
 
 router = APIRouter(tags=["health"])
@@ -21,7 +21,7 @@ def healthz():
     status = {
         "db": "ok",
         "redis": "ok",
-        "openai": "configured" if os.getenv("OPENAI_API_KEY") else "missing",
+        "openai": "configured" if settings.openai_api_key else "missing",
     }
     http_status = 200
 
@@ -33,7 +33,7 @@ def healthz():
         http_status = 503
         log_event("healthz_db_error", error=str(exc), level="error")
 
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    redis_url = settings.redis_url or "redis://localhost:6379/0"
     try:
         client = from_url(redis_url)
         client.ping()

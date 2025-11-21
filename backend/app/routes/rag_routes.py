@@ -6,21 +6,22 @@ import time
 from typing import List, Dict, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
 from openai import OpenAI
+from pydantic import BaseModel, Field
 
 from app.core.auth import csrf_protect, get_current_user
 from app.core.limits import check_rag_quota
-from app.rag.vector_store import query as vec_query
 from app.core.logging_utils import log_event
+from app.core.settings import settings
+from app.rag.vector_store import query as vec_query
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
 
-ANSWER_MODEL = os.getenv("ANSWER_MODEL", "gpt-4o-mini")
+ANSWER_MODEL = settings.answer_model
 MAX_CTX_CHARS_DEFAULT = int(os.getenv("RAG_MAX_CTX_CHARS", "7000"))
 DEFAULT_K = int(os.getenv("RAG_DEFAULT_K", "6"))
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = settings.openai_api_key
 
 oai = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
