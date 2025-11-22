@@ -9,15 +9,23 @@ from sqlalchemy.orm import Session
 from app.core.models import ContentIndex, IngestionJob, SourceState
 from app.ingest.text_normalize import normalize_text, compute_content_hash
 from app.ingest.should_ingest import should_reingest
-from app.ingest.chunking import split_by_chars
+try:
+    from app.ingest.chunking import split_by_chars as _legacy_split_by_chars
+except Exception:  # pragma: no cover - defensive import
+    _legacy_split_by_chars = None
+split_by_chars = _legacy_split_by_chars  # allow monkeypatching in tests
+from app.rag.chunk import chunk_text
 from app.rag import vector_store as vector
 from app.core.logging_utils import log_event
 from app.core.metrics import StageTimer
+from app.core.settings import settings
 
 DRIVE_SOURCE = "drive"
 PROGRESS_FLUSH_INTERVAL = max(1, int(os.getenv("INGEST_PROGRESS_FLUSH_INTERVAL", "10")))
 EMBED_BATCH_SIZE = max(1, int(os.getenv("EMBED_BATCH_SIZE", "48")))
 EMBED_TOKEN_LIMIT = max(1000, int(os.getenv("EMBED_TOKEN_LIMIT", "120000")))
+DRIVE_TARGET_TOKENS = max(100, int(settings.drive_chunk_target_tokens or 350))
+DRIVE_OVERLAP_TOKENS = max(0, int(settings.drive_chunk_overlap_tokens or 80))
 
 
 class EmbeddingBatchError(RuntimeError):
@@ -261,6 +269,7 @@ def _build_drive_chunk_meta(file_meta: Dict[str, Any]) -> Dict[str, Any]:
         "title": title,
         "mime_type": file_meta.get("mimeType"),
         "link": link,
+        "is_trashed": bool(file_meta.get("trashed") or file_meta.get("is_trashed")),
     }
 
 
@@ -271,22 +280,41 @@ def _build_chunk_rows(
     content_hash: str,
     doc_meta: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    base_meta = {"user_id": user_id, "doc_id": doc_id, "content_hash": content_hash}
+    base_meta = {"user_id": user_id, "doc_id": doc_id, "content_hash": content_hash, "source": "drive"}
     if doc_meta:
         base_meta.update({k: v for k, v in doc_meta.items() if v is not None})
 
+    # Legacy hook for tests/overrides: if split_by_chars is monkeypatched, use it.
+    legacy_splitter = globals().get("split_by_chars") or _legacy_split_by_chars
+    chunks = []
+    if callable(legacy_splitter):
+        for i, ch in enumerate(legacy_splitter(text)):
+            snippet = (ch or "").strip()
+            if not snippet:
+                continue
+            meta = dict(base_meta)
+            meta["chunk_index"] = i
+            chunks.append({"id": f"{user_id}-{doc_id}-{i}", "text": snippet, "meta": meta})
+
+    if not chunks and not callable(legacy_splitter):
+        chunks = chunk_text(
+            text,
+            meta=base_meta,
+            target_tokens=DRIVE_TARGET_TOKENS,
+            overlap_tokens=DRIVE_OVERLAP_TOKENS,
+            sentence_level=True,
+        )
     rows: List[Dict[str, Any]] = []
-    for i, ch in enumerate(split_by_chars(text)):
-        snippet = (ch or "").strip()
-        if not snippet:
-            continue
-        row_meta = dict(base_meta)
-        row_meta["chunk_index"] = i
+    for i, ch in enumerate(chunks):
+        idx = ch.get("meta", {}).get("chunk_index")
+        if idx is None:
+            idx = i
+        cid = f"{user_id}-{doc_id}-{idx}"
         rows.append(
             {
-                "id": f"{user_id}-{doc_id}-{i}",
-                "text": snippet[: vector.MAX_CHARS_PER_CHUNK],
-                "meta": row_meta,
+                "id": cid,
+                "text": (ch.get("text") or "")[: vector.MAX_CHARS_PER_CHUNK],
+                "meta": ch.get("meta", {}),
             }
         )
     return rows

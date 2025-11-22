@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthContext";
-import { apiGet, apiPost, fetchRelevantNow } from "./api";
+import { apiGet, apiPost, fetchRelevantNow, searchKnowledgeBase } from "./api";
 import { useIngestStatus } from "./hooks/useIngestStatus";
 
 const POLL_INTERVAL_MS = 3000;
@@ -8,6 +8,7 @@ const TERMINAL_STATUSES = new Set(["completed", "completed_with_errors", "failed
 
 const navItems = [
   { id: "home", label: "Home", icon: "⌂" },
+  { id: "search", label: "Search", icon: "🔎" },
   { id: "sources", label: "Sources", icon: "📁" },
   { id: "activity", label: "Activity", icon: "⏱" },
   { id: "settings", label: "Settings", icon: "⚙️" },
@@ -121,6 +122,11 @@ export default function Dashboard() {
   const [activeSection, setActiveSection] = useState("home");
   const [activityFilter, setActivityFilter] = useState("all");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchSource, setSearchSource] = useState("all");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState(null);
 
   const {
     jobs,
@@ -265,6 +271,27 @@ export default function Dashboard() {
     }
   };
 
+  const handleSearch = async (e) => {
+    e?.preventDefault();
+    if (!searchQuery.trim() || !csrfToken) return;
+    setSearchLoading(true);
+    setSearchError(null);
+    try {
+      const payload = {
+        query: searchQuery.trim(),
+        k: 8,
+        source: searchSource === "all" ? undefined : searchSource,
+      };
+      const resp = await searchKnowledgeBase(payload, csrfToken);
+      setSearchResults(resp?.results || []);
+    } catch (err) {
+      console.error("Search failed", err);
+      setSearchError("Search failed. Please try again.");
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
   const handleDisconnect = async () => {
     const confirmed = window.confirm("This will delete your data and disconnect your Google account. Continue?");
     if (!confirmed) return;
@@ -343,11 +370,109 @@ export default function Dashboard() {
     </div>
   );
 
+  const renderSearchResult = (hit, idx) => {
+    const meta = hit.meta || {};
+    const title = meta.title || meta.name || "(untitled)";
+    const docId = meta.doc_id || meta.id || "";
+    const source = (meta.source || "unknown").toLowerCase();
+    const link =
+      meta.link ||
+      meta.webViewLink ||
+      (source === "drive" && docId ? `https://drive.google.com/file/d/${docId}/view` : null);
+    const snippet = (hit.text || "").slice(0, 240);
+    const confidence =
+      typeof hit.confidence === "number"
+        ? hit.confidence
+        : typeof hit.similarity === "number"
+          ? hit.similarity
+          : null;
+    return (
+      <div key={hit.id || docId || idx} className="card" style={{ padding: "12px 14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center" }}>
+          <div>
+            <div className="card-title">
+              {link ? (
+                <a href={link} target="_blank" rel="noreferrer">
+                  {title}
+                </a>
+              ) : (
+                title
+              )}
+            </div>
+            <div className="text-muted-sm">
+              {source.charAt(0).toUpperCase() + source.slice(1)}
+              {docId ? ` · ${docId}` : ""}
+            </div>
+          </div>
+          {confidence !== null && (
+            <span className="badge-neutral">{`score: ${(confidence * 100).toFixed(0)}%`}</span>
+          )}
+        </div>
+        {snippet && (
+          <p className="text-muted" style={{ marginTop: "6px" }}>
+            {snippet}
+            {hit.text && hit.text.length > 240 ? "…" : ""}
+          </p>
+        )}
+      </div>
+    );
+  };
+
   const filteredJobs = useMemo(() => {
     if (activityFilter === "drive") return jobs.filter((j) => j.source === "drive" || j.kind === "drive");
     if (activityFilter === "calendar") return jobs.filter((j) => j.source === "calendar" || j.kind === "calendar");
     return jobs;
   }, [jobs, activityFilter]);
+
+  const searchView = (
+    <div style={{ padding: "20px 24px 24px" }}>
+      <div className="card" style={{ marginBottom: "16px" }}>
+        <div className="card-header" style={{ gap: "12px" }}>
+          <div>
+            <div className="card-title">Search your knowledge base</div>
+            <div className="card-subtitle">Find documents with snippets and direct links.</div>
+          </div>
+        </div>
+        <form onSubmit={handleSearch} style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <input
+            type="text"
+            className="chat-textarea"
+            style={{ minHeight: "48px", flex: "1 1 320px" }}
+            placeholder="Search across your synced docs…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {["all", "drive", "calendar"].map((src) => (
+              <button
+                key={src}
+                type="button"
+                className={`chat-suggestion-chip${searchSource === src ? " active" : ""}`}
+                onClick={() => setSearchSource(src)}
+              >
+                {src === "all" ? "All" : src.charAt(0).toUpperCase() + src.slice(1)}
+              </button>
+            ))}
+          </div>
+          <button className="button-primary" type="submit" disabled={searchLoading || !searchQuery.trim()}>
+            {searchLoading ? "Searching..." : "Search"}
+          </button>
+        </form>
+        <div style={{ marginTop: "12px" }}>
+          {searchError && <div style={{ color: "var(--danger)", fontSize: "0.9rem" }}>{searchError}</div>}
+          {!searchLoading && !searchError && searchResults.length === 0 && (
+            <div className="text-muted">No results yet. Try a search.</div>
+          )}
+          {searchLoading && <div className="text-muted">Searching…</div>}
+          {!searchLoading && searchResults.length > 0 && (
+            <div style={{ display: "grid", gap: "10px", marginTop: "8px" }}>
+              {searchResults.map((hit, idx) => renderSearchResult(hit, idx))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 
   const activityView = (
     <div style={{ padding: "20px 24px 24px" }}>
@@ -563,21 +688,39 @@ export default function Dashboard() {
                   {m.role === "assistant" &&
                     m.meta &&
                     (() => {
+                      const hasSources = m.meta.sources && m.meta.sources.length > 0;
                       const parts = [
                         m.meta.retrieved !== undefined ? `Based on ${m.meta.retrieved} chunks` : null,
                         m.meta.confidence !== undefined ? `confidence: ${m.meta.confidence}` : null,
                       ].filter(Boolean);
-                      const hasSources = m.meta.sources && m.meta.sources.length > 0;
                       if (parts.length === 0 && !hasSources) return null;
+                      const renderLabel = (source, idx) => {
+                        const label =
+                          source.title ||
+                          source.doc_id ||
+                          source.link ||
+                          source.source ||
+                          `source ${idx + 1}`;
+                        if (source.link) {
+                          return (
+                            <a href={source.link} target="_blank" rel="noreferrer">
+                              {`[${idx + 1}] ${label}`}
+                            </a>
+                          );
+                        }
+                        return `[${idx + 1}] ${label}`;
+                      };
                       return (
                         <div className="answer-meta">
                           {parts.join(" · ")}
                           {hasSources && (
                             <div style={{ marginTop: "4px" }}>
                               Sources:{" "}
-                              {m.meta.sources
-                                .map((s, idx) => s.title || s.doc_id || s.source || `source ${idx + 1}`)
-                                .join(" · ")}
+                              {m.meta.sources.map((s, idx) => (
+                                <span key={s.doc_id || s.id || idx} style={{ marginRight: "8px" }}>
+                                  {renderLabel(s, idx)}
+                                </span>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -719,6 +862,7 @@ export default function Dashboard() {
         </header>
 
         {activeSection === "home" && homeView}
+        {activeSection === "search" && searchView}
         {activeSection === "sources" && sourcesView}
         {activeSection === "activity" && activityView}
         {activeSection === "settings" && settingsView}

@@ -53,6 +53,17 @@ class Settings:
     embed_max_retries: int = field(default_factory=lambda: int(os.getenv("EMBED_MAX_RETRIES", "6")))
     embed_base_backoff: float = field(default_factory=lambda: float(os.getenv("EMBED_BASE_BACKOFF", "0.6")))
     answer_model: str = field(default_factory=lambda: os.getenv("ANSWER_MODEL", "gpt-4o-mini"))
+    rag_retrieval_k: int = field(default_factory=lambda: int(os.getenv("RAG_RETRIEVAL_K", os.getenv("RAG_DEFAULT_K", "6"))))
+    rag_min_confidence: float = field(default_factory=lambda: float(os.getenv("RAG_MIN_CONFIDENCE", "0.0")))
+    rag_max_chunks_per_doc: int = field(default_factory=lambda: int(os.getenv("RAG_MAX_CHUNKS_PER_DOC", "3")))
+    rag_rerank_top_k: int = field(default_factory=lambda: int(os.getenv("RAG_RERANK_TOP_K", "12")))
+    rag_rerank_diversity_weight: float = field(default_factory=lambda: float(os.getenv("RAG_RERANK_DIVERSITY_WEIGHT", "0.1")))
+    drive_chunk_target_tokens: int = field(default_factory=lambda: int(os.getenv("DRIVE_CHUNK_TARGET_TOKENS", "350")))
+    drive_chunk_overlap_tokens: int = field(default_factory=lambda: int(os.getenv("DRIVE_CHUNK_OVERLAP_TOKENS", "80")))
+    rag_search_min_chars: Optional[int] = field(
+        default_factory=lambda: (int(os.getenv("RAG_SEARCH_MIN_CHARS")) if os.getenv("RAG_SEARCH_MIN_CHARS") else None)
+    )
+    rag_search_skip_trashed: bool = field(default_factory=lambda: _to_bool(os.getenv("RAG_SEARCH_SKIP_TRASHED"), True))
 
     # Quotas
     max_ingests_per_day: int = field(default_factory=lambda: int(os.getenv("MAX_INGESTS_PER_USER_PER_DAY", "3")))

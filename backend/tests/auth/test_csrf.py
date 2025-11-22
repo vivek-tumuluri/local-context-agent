@@ -40,7 +40,16 @@ async def test_valid_csrf_header_allows_request(api_client, monkeypatch):
 
     def fake_query(query: str, k: int, user_id: str):
         return [
-            {"text": "chunk", "meta": {"source": "drive", "title": "Doc"}, "similarity": 0.8},
+            {
+                "text": "This is a long enough piece of content to pass filters in /rag/search.",
+                "meta": {
+                    "source": "drive",
+                    "title": "Doc",
+                    "doc_id": "fake-doc-id",
+                    "is_trashed": False,
+                },
+                "similarity": 0.9,
+            },
         ]
 
     monkeypatch.setattr(rag_routes, "vec_query", fake_query)

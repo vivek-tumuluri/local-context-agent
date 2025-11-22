@@ -51,3 +51,11 @@ export async function fetchRelevantNow(csrfToken) {
 export async function fetchIngestJobs(csrfToken) {
   return apiGet("/ingest/jobs", csrfToken);
 }
+
+export async function searchKnowledgeBase({ query, k = 6, source }, csrfToken) {
+  const payload = { query, k };
+  if (source) {
+    payload.source = source;
+  }
+  return apiPost("/rag/search", payload, csrfToken);
+}
