@@ -1,12 +1,32 @@
 import { useEffect, useState, useCallback } from "react";
 import { fetchIngestJobs } from "../api";
 
+function normalizeJob(job) {
+  if (!job) return null;
+  const metrics = job.metrics || {};
+  const logs = Array.isArray(job.logs) ? job.logs : Array.isArray(metrics.logs) ? metrics.logs : [];
+  return {
+    ...job,
+    id: job.job_id || job.id,
+    source: job.source || job.kind,
+    status: job.status,
+    createdAt: job.created_at || job.started_at,
+    updatedAt: job.updated_at || job.finished_at,
+    processed: job.processed_files ?? job.processed_count ?? metrics.ingested ?? metrics.found ?? 0,
+    total: job.total_files ?? job.total ?? metrics.found ?? undefined,
+    errors: job.errors ?? metrics.errors ?? metrics.error_count ?? 0,
+    errorSummary: job.error_summary,
+    logs,
+  };
+}
+
 function normalizeJobs(data) {
   const list = Array.isArray(data?.jobs) ? data.jobs : Array.isArray(data) ? data : [];
-  const sorted = [...list];
+  const normalized = list.map((j) => normalizeJob(j) || j);
+  const sorted = [...normalized];
   sorted.sort((a, b) => {
-    const aTime = new Date(a?.created_at || a?.started_at || 0).getTime();
-    const bTime = new Date(b?.created_at || b?.started_at || 0).getTime();
+    const aTime = new Date(a?.createdAt || a?.created_at || a?.started_at || 0).getTime();
+    const bTime = new Date(b?.createdAt || b?.created_at || b?.started_at || 0).getTime();
     return bTime - aTime;
   });
   return sorted;

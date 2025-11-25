@@ -5,6 +5,9 @@ env/
 ENV/
 .env
 .env.*
+!.env.example
+!.env.production.example
+/backend/.env
 
 # Python cache/artifacts
 __pycache__/

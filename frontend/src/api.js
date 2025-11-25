@@ -59,3 +59,7 @@ export async function searchKnowledgeBase({ query, k = 6, source }, csrfToken) {
   }
   return apiPost("/rag/search", payload, csrfToken);
 }
+
+export async function startCalendarIngest({ force_reembed = false } = {}, csrfToken) {
+  return apiPost("/ingest/calendar/start", { force_reembed }, csrfToken);
+}

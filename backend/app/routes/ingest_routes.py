@@ -92,6 +92,10 @@ class DriveStartBody(BaseModel):
     reembed_all: bool = False
 
 
+class CalendarStartBody(BaseModel):
+    force_reembed: bool = False
+
+
 
 if get_db is None:
     def _db_dependency():
@@ -182,6 +186,45 @@ def start_drive_ingest(
     if latest:
         response["status"] = latest["status"]
     return response
+
+
+@router.post("/calendar/start")
+def start_calendar_ingest(
+    body: CalendarStartBody,
+    user=Depends(get_current_user),
+    db: Session = Depends(_db_dependency),
+    _csrf=Depends(csrf_protect),
+):
+    # Only block on active calendar jobs (do not block if a drive job is running)
+    active_calendar_jobs = [
+        j
+        for j in job_helper.list_jobs(db, user_id=user.user_id, kind="calendar_ingest", limit=1, offset=0)
+        if (j.get("status") or "").lower() in job_helper.ACTIVE_STATUSES
+    ]
+    if active_calendar_jobs:
+        current = active_calendar_jobs[0]
+        return {
+            "job_id": current["job_id"],
+            "status": current["status"],
+            "queue_job_id": None,
+            "existing": True,
+        }
+
+    ensure_writes_enabled()
+    check_ingest_quota(user.user_id)
+
+    job_info = ingest_queue.enqueue_calendar_ingest_for_user(
+        db,
+        user_id=user.user_id,
+        force_reembed=body.force_reembed,
+    )
+    return {
+        "job_id": job_info.get("job_id"),
+        "status": job_info.get("status"),
+        "queue_job_id": job_info.get("queue_job_id"),
+        "existing": False,
+        "source": "calendar",
+    }
 
 
 @router.get("/jobs/{job_id}")

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthContext";
-import { apiGet, apiPost, fetchRelevantNow, searchKnowledgeBase } from "./api";
+import { apiGet, apiPost, fetchRelevantNow, searchKnowledgeBase, startCalendarIngest } from "./api";
 import { useIngestStatus } from "./hooks/useIngestStatus";
 
 const POLL_INTERVAL_MS = 3000;
@@ -231,6 +231,26 @@ export default function Dashboard() {
     }
   };
 
+  const handleCalendarIngest = async () => {
+    try {
+      setIngestError(null);
+      const job = await startCalendarIngest({ force_reembed: false }, csrfToken);
+      if (job && job.job_id) {
+        reloadIngestStatus();
+        setActiveSection("activity");
+      } else {
+        alert("Calendar ingest did not return a job_id.");
+      }
+    } catch (err) {
+      console.error("Calendar ingest failed", err);
+      if (err?.message?.includes("503")) {
+        setIngestError("Ingestion is temporarily unavailable – worker offline. Please try again later.");
+      } else {
+        setIngestError("Calendar ingest failed. Check backend logs.");
+      }
+    }
+  };
+
   const handleAsk = async () => {
     if (!question.trim()) {
       return;
@@ -319,6 +339,15 @@ export default function Dashboard() {
     if (ready) return { label: "Synced", code: "succeeded" };
     return base;
   }, [driveStatus, user]);
+
+  const effectiveCalendarStatus = useMemo(() => {
+    const ready = !!(user?.calendar_ready);
+    const base = calendarStatus || { label: "Not synced yet", code: "none" };
+    if (base.code === "running") return base;
+    if (base.code === "failed") return base;
+    if (ready) return { label: "Synced", code: "succeeded" };
+    return base;
+  }, [calendarStatus, user]);
 
   const initials = (user.full_name || user.email || "")
     .split(" ")
@@ -508,7 +537,15 @@ export default function Dashboard() {
                   <div>{job.source === "calendar" || job.kind === "calendar" ? "Calendar ingest" : "Drive ingest"}</div>
                   <div className="text-muted-sm">
                     {formatJobMeta(job)} · {formatTimestamp(job.created_at || job.started_at)}
+                    {job.errorSummary ? ` · Error: ${job.errorSummary}` : ""}
                   </div>
+                  {Array.isArray(job.logs) && job.logs.length > 0 && (
+                    <div className="text-muted-sm">
+                      {job.logs.slice(-3).map((log, idx) => (
+                        <div key={idx}>{log.message || JSON.stringify(log)}</div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <span className={statusPillClass(job.status)}>{job.status || "unknown"}</span>
               </div>
@@ -541,9 +578,9 @@ export default function Dashboard() {
           {renderSourcesCard({
             title: "Google Calendar",
             connected: isCalendarConnected,
-            status: calendarStatus,
+            status: effectiveCalendarStatus,
             job: lastCalendarJob,
-            onRunIngest: () => setActiveSection("activity"),
+            onRunIngest: handleCalendarIngest,
             onViewHistory: () => setActiveSection("activity"),
             includeDisconnect: false,
           })}
@@ -610,7 +647,7 @@ export default function Dashboard() {
       <div className="data-source-block">
         <div className="data-source-header">
           <span>Calendar</span>
-          <span className={statusPillClass(calendarStatus.code)}>{calendarStatus.label}</span>
+          <span className={statusPillClass(effectiveCalendarStatus.code)}>{effectiveCalendarStatus.label}</span>
         </div>
         <div className="text-muted">Used for Relevant now context.</div>
       </div>
@@ -627,24 +664,32 @@ export default function Dashboard() {
         <span className={statusPillClass(effectiveDriveStatus.code)}>{effectiveDriveStatus.label}</span>
       </div>
       {jobsLoading && <div className="text-muted">Loading activity…</div>}
-      {jobsError && <div style={{ color: "var(--danger)", fontSize: "0.85rem" }}>Error loading activity</div>}
-      {!jobsLoading && !jobsError && jobs.length === 0 && (
-        <div className="text-muted">No recent activity. Kick off an ingest to populate your workspace.</div>
-      )}
-      {!jobsLoading && !jobsError && jobs.length > 0 && (
-        <div className="activity-list">
-          {jobs.slice(0, 3).map((job) => (
-            <div key={job.job_id || job.id} className="activity-row">
-              <div>
-                <div>{job.source === "calendar" || job.kind === "calendar" ? "Calendar ingest" : "Drive ingest"}</div>
-                <div className="text-muted-sm">
-                  {formatJobMeta(job)} · {formatTimestamp(job.created_at || job.started_at)}
+          {jobsError && <div style={{ color: "var(--danger)", fontSize: "0.85rem" }}>Error loading activity</div>}
+          {!jobsLoading && !jobsError && jobs.length === 0 && (
+            <div className="text-muted">No recent activity. Kick off an ingest to populate your workspace.</div>
+          )}
+          {!jobsLoading && !jobsError && jobs.length > 0 && (
+            <div className="activity-list">
+              {jobs.slice(0, 3).map((job) => (
+                <div key={job.job_id || job.id} className="activity-row">
+                  <div>
+                    <div>{job.source === "calendar" || job.kind === "calendar" ? "Calendar ingest" : "Drive ingest"}</div>
+                    <div className="text-muted-sm">
+                      {formatJobMeta(job)} · {formatTimestamp(job.created_at || job.started_at)}
+                    </div>
+                    {job.errorSummary && <div style={{ color: "var(--danger)", fontSize: "0.85rem" }}>{job.errorSummary}</div>}
+                    {Array.isArray(job.logs) && job.logs.length > 0 && (
+                      <div className="text-muted-sm">
+                        {job.logs.slice(-3).map((log, idx) => (
+                          <div key={idx}>{log.message || JSON.stringify(log)}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <span className={statusPillClass(job.status)}>{job.status || "Not started"}</span>
                 </div>
-              </div>
-              <span className={statusPillClass(job.status)}>{job.status || "Not started"}</span>
-            </div>
-          ))}
-          {driveJob?.error_summary && (
+              ))}
+              {driveJob?.error_summary && (
             <div style={{ color: "var(--danger)", fontSize: "0.85rem" }}>Error: {driveJob.error_summary}</div>
           )}
         </div>
