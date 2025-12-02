@@ -5,6 +5,9 @@ from typing import Union
 from xml.etree import ElementTree as ET
 from pypdf import PdfReader
 
+from app.core.settings import settings
+from app.core.logging_utils import log_event
+
 
 DOCX_MIMES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -41,6 +44,15 @@ def to_text(content: Union[str, bytes], filename: str, mime: str | None = None) 
         if mime and mime.startswith("text/"):
             return data.decode("utf-8", errors="ignore")
 
+        # Unknown/unsupported MIME: only allow small payloads to be decoded, otherwise bail out.
+        if len(data) > settings.azeryn_fallback_max_bytes:
+            log_event(
+                "parser_skip_unknown_mime",
+                mime_type=mime,
+                size_bytes=len(data),
+                reason="unknown_mime_fallback_limit",
+            )
+            return ""
 
         return data.decode("utf-8", errors="ignore")
     except Exception:

@@ -330,9 +330,18 @@ def _run_drive_job(job_id: str) -> None:
             return
         flush_progress(force=True)
         errors = int((result or {}).get("errors") or 0)
+        token_budget_hit = bool((result or {}).get("token_budget_hit"))
         if errors:
             summary = f"Ingest completed with {errors} error(s)."
             job_helper.finish_job(db, job_id, status="failed", error_summary=summary, metrics=result)
+            _log_inline_failure(job_id, user_id, start_time, summary)
+            return
+        if token_budget_hit:
+            summary = (
+                f"Ingest stopped after reaching token budget "
+                f"({result.get('estimated_tokens_embedded')} of {settings.settings.azeryn_max_tokens_per_job})."
+            )
+            job_helper.finish_job(db, job_id, status="partial", error_summary=summary, metrics=result)
             _log_inline_failure(job_id, user_id, start_time, summary)
             return
 

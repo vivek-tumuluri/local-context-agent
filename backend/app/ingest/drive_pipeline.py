@@ -26,6 +26,12 @@ EMBED_BATCH_SIZE = max(1, int(os.getenv("EMBED_BATCH_SIZE", "48")))
 EMBED_TOKEN_LIMIT = max(1000, int(os.getenv("EMBED_TOKEN_LIMIT", "120000")))
 DRIVE_TARGET_TOKENS = max(100, int(settings.drive_chunk_target_tokens or 350))
 DRIVE_OVERLAP_TOKENS = max(0, int(settings.drive_chunk_overlap_tokens or 80))
+ALLOWED_MIME_TYPES = settings.drive_ingest_allowed_mime
+MAX_FILE_BYTES = max(1, int(settings.azeryn_max_file_bytes or 5_000_000))
+FALLBACK_AVG_TOKENS = max(1, int(settings.azeryn_avg_tokens_per_chunk or 350))
+MAX_CHUNKS_PER_FILE = max(1, int(settings.azeryn_max_chunks_per_file or 300))
+MAX_TOKENS_PER_FILE = max(0, int(settings.azeryn_max_tokens_per_file or 0))
+MAX_TOKENS_PER_JOB = max(0, int(settings.azeryn_max_tokens_per_job or 0))
 
 
 class EmbeddingBatchError(RuntimeError):
@@ -44,6 +50,8 @@ class DocWork:
     content_hash: str
     embedded_count: int
     new_chunk_ids: List[str] = field(default_factory=list)
+    partial: bool = False
+    estimated_tokens: int = 0
 
 
 class EmbeddingBatcher:
@@ -172,6 +180,20 @@ def save_drive_cursor(
         state.extra = extra
     state.updated_at = now
     db.commit()
+
+
+def _supported_mime(mime: Optional[str]) -> bool:
+    if not mime:
+        return False
+    return mime in ALLOWED_MIME_TYPES
+
+
+def _file_size_from_meta(meta: Dict[str, Any]) -> Optional[int]:
+    raw = meta.get("size") or meta.get("size_bytes")
+    try:
+        return int(raw)
+    except Exception:
+        return None
 
 
 def _to_dt(val) -> Optional[datetime]:
@@ -352,6 +374,21 @@ def process_drive_file(
     fid = file_meta["id"]
     stored = _get_row(db, user_id, "drive", fid)
     result = {"processed": 0, "embedded": 0}
+    mime = file_meta.get("mimeType") or file_meta.get("mime_type")
+
+    size_bytes = _file_size_from_meta(file_meta)
+    if size_bytes and size_bytes > MAX_FILE_BYTES:
+        log_event(
+            "drive_file_skipped",
+            user_id=user_id,
+            doc_id=fid,
+            name=file_meta.get("name"),
+            mime_type=mime,
+            reason="file_too_large_bytes",
+            size_bytes=size_bytes,
+        )
+        result["skipped_reason"] = "file_too_large_bytes"
+        return result
 
     if not force_reembed and not should_reingest(stored, file_meta):
         result["processed"] = 1
@@ -360,6 +397,19 @@ def process_drive_file(
     raw = fetch_file_bytes(user_id=user_id, file_id=fid, mime_type=file_meta.get("mimeType"))
     if not raw:
         result["processed"] = 1
+        return result
+    if len(raw) > MAX_FILE_BYTES:
+        log_event(
+            "drive_file_skipped",
+            user_id=user_id,
+            doc_id=fid,
+            name=file_meta.get("name"),
+            mime_type=mime,
+            reason="file_too_large_download",
+            size_bytes=len(raw),
+        )
+        result["processed"] = 1
+        result["skipped_reason"] = "file_too_large_download"
         return result
 
     parsed = parse_bytes(raw, file_meta.get("mimeType"))
@@ -380,6 +430,53 @@ def process_drive_file(
     if not chunk_rows:
         raise RuntimeError(f"Embedding returned no chunks for document {fid}; aborting update.")
 
+    partial = False
+    if len(chunk_rows) > MAX_CHUNKS_PER_FILE:
+        chunk_rows = chunk_rows[:MAX_CHUNKS_PER_FILE]
+        partial = True
+        log_event(
+            "drive_file_truncated",
+            user_id=user_id,
+            doc_id=fid,
+            name=file_meta.get("name"),
+            reason="max_chunks_per_file",
+            max_chunks=MAX_CHUNKS_PER_FILE,
+        )
+
+    est_tokens = len(chunk_rows) * FALLBACK_AVG_TOKENS
+    if MAX_TOKENS_PER_FILE and est_tokens > MAX_TOKENS_PER_FILE:
+        allowed_chunks = max(0, MAX_TOKENS_PER_FILE // FALLBACK_AVG_TOKENS)
+        if allowed_chunks <= 0:
+            log_event(
+                "drive_file_skipped",
+                user_id=user_id,
+                doc_id=fid,
+                name=file_meta.get("name"),
+                mime_type=mime,
+                reason="file_too_large_tokens",
+                estimated_tokens=est_tokens,
+            )
+            result["processed"] = 1
+            result["skipped_reason"] = "file_too_large_tokens"
+            return result
+        if allowed_chunks < len(chunk_rows):
+            chunk_rows = chunk_rows[:allowed_chunks]
+            est_tokens = len(chunk_rows) * FALLBACK_AVG_TOKENS
+            partial = True
+            log_event(
+                "drive_file_truncated",
+                user_id=user_id,
+                doc_id=fid,
+                name=file_meta.get("name"),
+                reason="max_tokens_per_file",
+                max_tokens=MAX_TOKENS_PER_FILE,
+            )
+
+    if not chunk_rows:
+        result["processed"] = 1
+        result["skipped_reason"] = "empty_after_truncate"
+        return result
+
     work = DocWork(
         doc_id=fid,
         user_id=user_id,
@@ -388,6 +485,8 @@ def process_drive_file(
         file_meta=dict(file_meta),
         content_hash=chash,
         embedded_count=len(chunk_rows),
+        partial=partial,
+        estimated_tokens=est_tokens,
     )
 
     result["processed"] = 1
@@ -406,6 +505,7 @@ def run_drive_ingest_once(
     page_token: Optional[str] = None,
     page_size: int = 50,
     force_reembed: bool = False,
+    tokens_already_embedded: int = 0,
 ) -> Dict[str, Any]:
     processed = embedded = errors = 0
     next_token = None
@@ -413,6 +513,13 @@ def run_drive_ingest_once(
     pending_progress = 0
     metrics_dirty = False
     batcher = EmbeddingBatcher(user_id)
+    skipped_unsupported_mime = 0
+    skipped_too_large_bytes = 0
+    skipped_token_cap = 0
+    partial_files = 0
+    chunks_embedded = 0
+    estimated_tokens_embedded = max(0, int(tokens_already_embedded or 0))
+    token_budget_hit = False
 
     def flush_job_updates(force: bool = False) -> None:
         nonlocal pending_progress, metrics_dirty
@@ -424,8 +531,18 @@ def run_drive_ingest_once(
         if pending_progress:
             job.processed_files = current + pending_progress
         metrics = dict(job.metrics or {}) if job.metrics else {}
-        metrics["embedded"] = embedded
-        metrics["errors"] = errors
+        metrics.update(
+            {
+                "embedded": embedded,
+                "errors": errors,
+                "files_skipped_unsupported_mime": skipped_unsupported_mime,
+                "files_skipped_too_large_bytes": skipped_too_large_bytes,
+                "files_skipped_token_cap": skipped_token_cap,
+                "files_partial_indexed": partial_files,
+                "chunks_embedded": chunks_embedded,
+                "estimated_tokens_embedded": estimated_tokens_embedded,
+            }
+        )
         job.metrics = metrics
         job.updated_at = datetime.now(timezone.utc)
         pending_progress = 0
@@ -451,6 +568,33 @@ def run_drive_ingest_once(
         for f in files:
             processed_delta = 0
             try:
+                mime = f.get("mimeType") or f.get("mime_type")
+                if not _supported_mime(mime):
+                    skipped_unsupported_mime += 1
+                    log_event(
+                        "drive_file_skipped",
+                        user_id=user_id,
+                        doc_id=f.get("id"),
+                        name=f.get("name"),
+                        mime_type=mime,
+                        reason="unsupported_mime",
+                    )
+                    continue
+
+                size_bytes = _file_size_from_meta(f)
+                if size_bytes and size_bytes > MAX_FILE_BYTES:
+                    skipped_too_large_bytes += 1
+                    log_event(
+                        "drive_file_skipped",
+                        user_id=user_id,
+                        doc_id=f.get("id"),
+                        name=f.get("name"),
+                        mime_type=mime,
+                        reason="file_too_large_bytes",
+                        size_bytes=size_bytes,
+                    )
+                    continue
+
                 with StageTimer("drive_process_file", user_id=user_id, doc_id=f.get("id")):
                     summary = process_drive_file(
                         db,
@@ -464,6 +608,19 @@ def run_drive_ingest_once(
                 processed += processed_delta
                 doc_work = summary.get("doc_work")
                 if doc_work:
+                    est_tokens = summary.get("estimated_tokens") or getattr(doc_work, "estimated_tokens", 0) or (
+                        len(doc_work.chunks) * FALLBACK_AVG_TOKENS
+                    )
+                    if MAX_TOKENS_PER_JOB and (estimated_tokens_embedded + est_tokens > MAX_TOKENS_PER_JOB):
+                        skipped_token_cap += 1
+                        token_budget_hit = True
+                        if job:
+                            job.status = "partial"
+                            job.error_summary = (
+                                f"Token budget exceeded ({estimated_tokens_embedded + est_tokens}"
+                                f" > {MAX_TOKENS_PER_JOB})."
+                            )
+                        break
                     try:
                         ready_docs = batcher.enqueue_doc(doc_work)
                     except EmbeddingBatchError as exc:
@@ -478,8 +635,17 @@ def run_drive_ingest_once(
                             )
                         raise
                     embedded += _finalize_ready_docs(db, user_id, ready_docs)
+                    if ready_docs:
+                        chunks_embedded += sum(w.embedded_count for w in ready_docs)
+                        estimated_tokens_embedded = tokens_already_embedded + chunks_embedded * FALLBACK_AVG_TOKENS
+                        partial_files += sum(1 for w in ready_docs if getattr(w, "partial", False))
                 else:
                     embedded += summary.get("embedded", 0)
+                    reason = summary.get("skipped_reason")
+                    if reason in {"file_too_large_bytes", "file_too_large_download"}:
+                        skipped_too_large_bytes += 1
+                    if reason in {"file_too_large_tokens", "empty_after_truncate"}:
+                        skipped_token_cap += 1
             except Exception as exc:
                 errors += 1
                 log_event(
@@ -504,6 +670,8 @@ def run_drive_ingest_once(
                 metrics_dirty = True
                 if pending_progress >= PROGRESS_FLUSH_INTERVAL:
                     flush_job_updates()
+            if token_budget_hit:
+                break
     except Exception:
         db.rollback()
         raise
@@ -523,6 +691,10 @@ def run_drive_ingest_once(
         db.rollback()
         raise
     embedded += _finalize_ready_docs(db, user_id, ready_docs)
+    if ready_docs:
+        chunks_embedded += sum(w.embedded_count for w in ready_docs)
+        estimated_tokens_embedded = tokens_already_embedded + chunks_embedded * FALLBACK_AVG_TOKENS
+        partial_files += sum(1 for w in ready_docs if getattr(w, "partial", False))
 
     flush_job_updates(force=True)
     try:
@@ -531,10 +703,25 @@ def run_drive_ingest_once(
         db.rollback()
         raise
 
+    if token_budget_hit:
+        log_event(
+            "drive_ingest_token_budget_hit",
+            user_id=user_id,
+            estimated_tokens=estimated_tokens_embedded,
+            max_tokens=MAX_TOKENS_PER_JOB,
+        )
+
     return {
         "processed": processed,
         "embedded": embedded,
         "errors": errors,
         "nextPageToken": next_token,
         "listing_failed": listing_failed,
+        "files_skipped_unsupported_mime": skipped_unsupported_mime,
+        "files_skipped_too_large_bytes": skipped_too_large_bytes,
+        "files_skipped_token_cap": skipped_token_cap,
+        "files_partial_indexed": partial_files,
+        "chunks_embedded": chunks_embedded,
+        "estimated_tokens_embedded": estimated_tokens_embedded,
+        "token_budget_hit": token_budget_hit,
     }

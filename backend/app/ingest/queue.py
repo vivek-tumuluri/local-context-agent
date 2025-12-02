@@ -121,6 +121,7 @@ def _run_ingest(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         result = drive_ingest.ingest_drive(on_progress=on_progress, **payload)
         flush_progress(force=True)
         errors = int(result.get("errors") or 0)
+        token_budget_hit = bool(result.get("token_budget_hit"))
         if errors:
             summary = f"Ingest completed with {errors} error(s)."
             job_helper.finish_job(db, job_id, status="failed", error_summary=summary, metrics=result)
@@ -130,6 +131,25 @@ def _run_ingest(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
                 job_id=job_id,
                 user_id=user_id,
                 status="failed",
+                duration_ms=duration_ms,
+                attempt=attempt_ctx.get("attempt"),
+                max_attempts=attempt_ctx.get("max_attempts"),
+                rq_job_id=attempt_ctx.get("rq_job_id"),
+                metrics=result,
+            )
+            return result
+        if token_budget_hit:
+            summary = (
+                f"Ingest stopped after reaching token budget "
+                f"({result.get('estimated_tokens_embedded')} of {settings.azeryn_max_tokens_per_job})."
+            )
+            job_helper.finish_job(db, job_id, status="partial", error_summary=summary, metrics=result)
+            duration_ms = round((time.perf_counter() - timing_start) * 1000, 3)
+            log_event(
+                "ingest_job_completed",
+                job_id=job_id,
+                user_id=user_id,
+                status="partial",
                 duration_ms=duration_ms,
                 attempt=attempt_ctx.get("attempt"),
                 max_attempts=attempt_ctx.get("max_attempts"),

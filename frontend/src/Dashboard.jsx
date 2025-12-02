@@ -207,7 +207,7 @@ export default function Dashboard() {
     try {
       const payload = {
         query: "",
-        max_files: 5,
+        max_files: 650,
         reembed_all: false,
       };
       setIngestError(null);

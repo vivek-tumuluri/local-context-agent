@@ -15,6 +15,13 @@ def _to_bool(val: Optional[str], default: bool = False) -> bool:
     return str(val).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _csv_set(val: Optional[str], default: str = "") -> set[str]:
+    raw = val if val is not None else default
+    if not raw:
+        return set()
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
 @dataclass
 class Settings:
     env: str = field(
@@ -69,6 +76,15 @@ class Settings:
     max_ingests_per_day: int = field(default_factory=lambda: int(os.getenv("MAX_INGESTS_PER_USER_PER_DAY", "3")))
     max_rag_requests_per_day: int = field(default_factory=lambda: int(os.getenv("MAX_RAG_REQUESTS_PER_DAY", "200")))
 
+    # Ingest guardrails
+    drive_ingest_allowed_mime_raw: str = field(default_factory=lambda: os.getenv("DRIVE_INGEST_ALLOWED_MIME", ""))
+    azeryn_max_file_bytes: int = field(default_factory=lambda: int(os.getenv("AZERYN_MAX_FILE_BYTES", str(5_000_000))))
+    azeryn_fallback_max_bytes: int = field(default_factory=lambda: int(os.getenv("AZERYN_FALLBACK_MAX_BYTES", str(500_000))))
+    azeryn_max_chunks_per_file: int = field(default_factory=lambda: int(os.getenv("AZERYN_MAX_CHUNKS_PER_FILE", str(300))))
+    azeryn_avg_tokens_per_chunk: int = field(default_factory=lambda: int(os.getenv("AZERYN_AVG_TOKENS_PER_CHUNK", str(350))))
+    azeryn_max_tokens_per_file: int = field(default_factory=lambda: int(os.getenv("AZERYN_MAX_TOKENS_PER_FILE", str(0))))
+    azeryn_max_tokens_per_job: int = field(default_factory=lambda: int(os.getenv("AZERYN_MAX_TOKENS_PER_JOB", str(5_000_000))))
+
     @property
     def is_local(self) -> bool:
         return self.env.lower() in {"local", "development", "dev"}
@@ -88,6 +104,23 @@ class Settings:
         if self.session_cookie_samesite_override:
             return self.session_cookie_samesite_override
         return "lax" if self.is_local else "strict"
+
+    @property
+    def drive_ingest_allowed_mime(self) -> set[str]:
+        defaults = {
+            "application/vnd.google-apps.document",
+            "application/vnd.google-apps.spreadsheet",
+            "application/vnd.google-apps.presentation",
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "text/plain",
+            "text/markdown",
+            "text/csv",
+            "text/tab-separated-values",
+        }
+        override = _csv_set(self.drive_ingest_allowed_mime_raw)
+        return override or defaults
 
     def _require(self, name: str, value: str, *, min_len: int = 1, hard_min_len: Optional[int] = None) -> list[str]:
         errors: list[str] = []

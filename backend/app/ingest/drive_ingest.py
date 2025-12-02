@@ -38,6 +38,8 @@ DEFAULT_JOB_MAX = int(os.getenv("INGEST_DRIVE_DEFAULT_MAX", "50"))
 MAX_PAGE_SIZE = int(os.getenv("INGEST_DRIVE_PAGE_SIZE", "200"))
 MAX_LIST_RETRIES = int(os.getenv("INGEST_DRIVE_LIST_RETRIES", "4"))
 LIST_BACKOFF_BASE = float(os.getenv("INGEST_DRIVE_BACKOFF_BASE", "0.8"))
+MAX_FILE_BYTES = int(settings.azeryn_max_file_bytes or 5_000_000)
+ALLOWED_MIME_TYPES = settings.drive_ingest_allowed_mime
 
 
 def _drive_service(creds):
@@ -115,6 +117,16 @@ def ingest_drive_endpoint(
     use_cursor = name_contains is None
     next_page: Optional[str] = load_drive_cursor(db, user.user_id) if use_cursor else None
     remaining = limit
+    tokens_embedded = 0
+    token_budget_hit = False
+    totals = {
+        "files_skipped_unsupported_mime": 0,
+        "files_skipped_too_large_bytes": 0,
+        "files_skipped_token_cap": 0,
+        "files_partial_indexed": 0,
+        "chunks_embedded": 0,
+        "estimated_tokens_embedded": 0,
+    }
 
     while remaining > 0:
         page_size = min(MAX_PAGE_SIZE, remaining)
@@ -128,19 +140,29 @@ def ingest_drive_endpoint(
                 job=None,
                 page_token=next_page,
                 page_size=page_size,
+                tokens_already_embedded=tokens_embedded,
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         processed += summary.get("processed", 0)
         embedded += summary.get("embedded", 0)
         errors += summary.get("errors", 0)
+        totals["files_skipped_unsupported_mime"] += int(summary.get("files_skipped_unsupported_mime") or 0)
+        totals["files_skipped_too_large_bytes"] += int(summary.get("files_skipped_too_large_bytes") or 0)
+        totals["files_skipped_token_cap"] += int(summary.get("files_skipped_token_cap") or 0)
+        totals["files_partial_indexed"] += int(summary.get("files_partial_indexed") or 0)
+        totals["chunks_embedded"] += int(summary.get("chunks_embedded") or 0)
+        tokens_embedded = summary.get("estimated_tokens_embedded", tokens_embedded) or tokens_embedded
+        token_budget_hit = token_budget_hit or bool(summary.get("token_budget_hit"))
         remaining -= summary.get("processed", 0)
         next_page = summary.get("nextPageToken")
         if summary.get("errors"):
             break
         if use_cursor and not summary.get("listing_failed"):
             save_drive_cursor(db, user.user_id, next_page)
-        if not next_page or summary.get("processed", 0) == 0:
+        if token_budget_hit:
+            break
+        if not next_page:
             break
 
     if errors:
@@ -148,7 +170,14 @@ def ingest_drive_endpoint(
             status_code=502,
             detail=f"Drive ingest failed after encountering {errors} error(s).",
         )
-    return {"found": processed, "ingested": embedded, "errors": errors}
+    return {
+        "found": processed,
+        "ingested": embedded,
+        "errors": errors,
+        "token_budget_hit": token_budget_hit,
+        "estimated_tokens_embedded": tokens_embedded,
+        **totals,
+    }
 
 def _download(svc, file_id: str, mime: str | None):
     buf = io.BytesIO()
@@ -185,6 +214,16 @@ def ingest_drive(
     use_cursor = not reembed_all and name_filter is None
     page_token: Optional[str] = None
     remaining = limit
+    token_budget_hit = False
+    tokens_embedded = 0
+    totals = {
+        "files_skipped_unsupported_mime": 0,
+        "files_skipped_too_large_bytes": 0,
+        "files_skipped_token_cap": 0,
+        "files_partial_indexed": 0,
+        "chunks_embedded": 0,
+        "estimated_tokens_embedded": 0,
+    }
 
     db = SessionLocal()
     try:
@@ -202,10 +241,18 @@ def ingest_drive(
                 page_token=page_token,
                 page_size=page_size,
                 force_reembed=reembed_all,
+                tokens_already_embedded=tokens_embedded,
             )
             processed += summary.get("processed", 0)
             embedded += summary.get("embedded", 0)
             errors += summary.get("errors", 0)
+            totals["files_skipped_unsupported_mime"] += int(summary.get("files_skipped_unsupported_mime") or 0)
+            totals["files_skipped_too_large_bytes"] += int(summary.get("files_skipped_too_large_bytes") or 0)
+            totals["files_skipped_token_cap"] += int(summary.get("files_skipped_token_cap") or 0)
+            totals["files_partial_indexed"] += int(summary.get("files_partial_indexed") or 0)
+            totals["chunks_embedded"] += int(summary.get("chunks_embedded") or 0)
+            tokens_embedded = summary.get("estimated_tokens_embedded", tokens_embedded) or tokens_embedded
+            token_budget_hit = token_budget_hit or bool(summary.get("token_budget_hit"))
             remaining -= summary.get("processed", 0)
             page_token = summary.get("nextPageToken")
             if summary.get("errors"):
@@ -217,10 +264,19 @@ def ingest_drive(
                 total_hint = processed + max(remaining, 0)
                 on_progress(processed, total_hint or processed, f"embedded chunks: {embedded}")
 
-            if not page_token or summary.get("processed", 0) == 0:
+            if token_budget_hit:
+                break
+            if not page_token:
                 break
 
-        return {"found": processed, "ingested": embedded, "errors": errors}
+        totals["estimated_tokens_embedded"] = tokens_embedded
+        totals["token_budget_hit"] = token_budget_hit
+        return {
+            "found": processed,
+            "ingested": embedded,
+            "errors": errors,
+            **totals,
+        }
     finally:
         db.close()
 
