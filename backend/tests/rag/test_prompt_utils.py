@@ -28,3 +28,17 @@ def test_confidence_falls_back_to_similarity():
     hits = [{"similarity": 0.5}, {"distance": 0.2}]
     conf = rag_routes._confidence(hits)
     assert 0 < conf < 1
+
+
+def test_rerank_keeps_best_chunk_from_repeated_doc():
+    hits = [
+        {"text": "DigiSwasthya overview", "similarity": 0.18, "meta": {"title": "DigiSwasthya Pitch", "doc_id": "pitch"}},
+        {"text": "DigiSwasthya process", "similarity": 0.16, "meta": {"title": "DigiSwasthya Pitch", "doc_id": "pitch"}},
+        {"text": "DigiSwasthya team", "similarity": -0.05, "meta": {"title": "DigiSwasthya Pitch", "doc_id": "pitch"}},
+        {"text": "Unrelated farm assistant", "similarity": -0.16, "meta": {"title": "Digital Agronomist", "doc_id": "farm"}},
+    ]
+
+    ranked = rag_routes._rerank_hits(hits, top_k=4, diversity_weight=0.1, query="What is DigiSwasthya?")
+
+    assert ranked[0]["meta"]["doc_id"] == "pitch"
+    assert "overview" in ranked[0]["text"]

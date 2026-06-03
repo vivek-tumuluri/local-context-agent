@@ -23,4 +23,5 @@ def build_flow():
             }
         },
         scopes=SCOPES,
+        autogenerate_code_verifier=False,
     )

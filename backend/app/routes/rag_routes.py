@@ -172,18 +172,16 @@ def _rerank_hits(hits: List[Dict[str, Any]], top_k: int, diversity_weight: float
         return hits
     window = hits[:top_k]
     query_tokens = _tokenize_query(query)
-    doc_counts: Dict[str, int] = {}
-    for h in window:
-        meta = h.get("meta", {}) or {}
-        doc_id = meta.get("doc_id") or meta.get("id") or "unknown"
-        doc_counts[doc_id] = doc_counts.get(doc_id, 0) + 1
+    seen_by_doc: Dict[str, int] = {}
     scored = []
     for idx, h in enumerate(window):
         meta = h.get("meta", {}) or {}
         doc_id = meta.get("doc_id") or meta.get("id") or "unknown"
+        duplicate_index = seen_by_doc.get(doc_id, 0)
+        seen_by_doc[doc_id] = duplicate_index + 1
         base = _score_hit(h)
         boost = _lexical_boost(h, query_tokens)
-        penalty = max(0, doc_counts.get(doc_id, 1) - 1) * diversity_weight
+        penalty = duplicate_index * diversity_weight
         score = base + boost - penalty
         scored.append((score, idx, h))
     scored.sort(key=lambda tup: (-tup[0], tup[1]))

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { apiGet } from "./api";
 
@@ -17,7 +18,7 @@ export function AuthProvider({ children }) {
       const data = await apiGet("/auth/me");
       setUser(data.user || null);
       setCsrfToken(data.csrf_token || null);
-    } catch (err) {
+    } catch {
       setUser(null);
       setCsrfToken(null);
     } finally {
@@ -35,7 +36,7 @@ export function AuthProvider({ children }) {
           setUser(data.user || null);
           setCsrfToken(data.csrf_token || null);
         }
-      } catch (err) {
+      } catch {
         if (!cancelled) {
           setUser(null);
           setCsrfToken(null);
