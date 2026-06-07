@@ -1,0 +1,837 @@
+[
+  {
+    "id": "drive_semantic_launch_001",
+    "category": "drive_semantic",
+    "query": "What are the launch freeze milestones?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["launch_plan"],
+    "expected_source": "drive",
+    "answer_must_include": ["design freeze", "QA freeze"],
+    "documents": [
+      {
+        "id": "launch_plan",
+        "source": "drive",
+        "title": "Launch Plan",
+        "text": "Launch plan draft outlines design freeze on April 18 and QA freeze on May 2.",
+        "relevant": true
+      },
+      {
+        "id": "retro_notes",
+        "source": "drive",
+        "title": "Launch Retro",
+        "text": "Post-launch retro focuses on telemetry gaps and alert fatigue.",
+        "relevant": false
+      },
+      {
+        "id": "office_faq",
+        "source": "drive",
+        "title": "Office FAQ",
+        "text": "The office FAQ covers badges, guests, and desk reservations.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "drive_exact_title_001",
+    "category": "exact_title",
+    "query": "What does the Customer Update Plan say?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["customer_update_plan"],
+    "expected_source": "drive",
+    "answer_must_include": ["customer update emails", "Priya"],
+    "documents": [
+      {
+        "id": "customer_update_plan",
+        "source": "drive",
+        "title": "Customer Update Plan",
+        "text": "Marketing plan assigns customer update emails to Priya with backups from Leo.",
+        "relevant": true
+      },
+      {
+        "id": "support_rotation",
+        "source": "drive",
+        "title": "Support Rotation",
+        "text": "Support escalation document describes pager rotation and weekend handoffs.",
+        "relevant": false
+      },
+      {
+        "id": "launch_appendix",
+        "source": "drive",
+        "title": "Launch Experiments Appendix",
+        "text": "The launch appendix covers experiments and feature flag cleanup.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "drive_exact_phrase_001",
+    "category": "exact_phrase",
+    "query": "Where is the phrase telemetry collection kicks off?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["telemetry_timeline"],
+    "expected_source": "drive",
+    "answer_must_include": ["May 9"],
+    "documents": [
+      {
+        "id": "telemetry_timeline",
+        "source": "drive",
+        "title": "Telemetry Timeline",
+        "text": "Telemetry collection kicks off one week after QA freeze, targeting May 9.",
+        "relevant": true
+      },
+      {
+        "id": "telemetry_retro",
+        "source": "drive",
+        "title": "Telemetry Retro",
+        "text": "The retro mentions telemetry improvements but does not set a start date.",
+        "relevant": false
+      },
+      {
+        "id": "analytics_faq",
+        "source": "drive",
+        "title": "Analytics FAQ",
+        "text": "FAQ entries describe dashboard permissions and metric definitions.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "owner_person_001",
+    "category": "owner_person",
+    "query": "Who owns customer update emails?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["owners_marketing"],
+    "expected_source": "drive",
+    "answer_must_include": ["Priya"],
+    "documents": [
+      {
+        "id": "owners_marketing",
+        "source": "drive",
+        "title": "Marketing Owners",
+        "text": "Marketing plan assigns customer update emails to Priya with backups from Leo.",
+        "relevant": true
+      },
+      {
+        "id": "owners_security",
+        "source": "drive",
+        "title": "Security Owners",
+        "text": "Security review owners are Mina for threat modeling and Omar for audit logs.",
+        "relevant": false
+      },
+      {
+        "id": "customer_faq",
+        "source": "drive",
+        "title": "Customer FAQ",
+        "text": "FAQ answers common customer questions about billing and renewals.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "date_drive_001",
+    "category": "date_drive",
+    "query": "When is QA freeze?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["launch_plan_dates"],
+    "expected_source": "drive",
+    "answer_must_include": ["May 2"],
+    "documents": [
+      {
+        "id": "launch_plan_dates",
+        "source": "drive",
+        "title": "Launch Plan Dates",
+        "text": "Launch plan draft outlines design freeze on April 18 and QA freeze on May 2.",
+        "relevant": true
+      },
+      {
+        "id": "qa_checklist",
+        "source": "drive",
+        "title": "QA Checklist",
+        "text": "QA checklist covers browser coverage, regression tests, and signoff roles.",
+        "relevant": false
+      },
+      {
+        "id": "release_retro",
+        "source": "drive",
+        "title": "Release Retro",
+        "text": "Release retro says the launch completed with minor support volume.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "calendar_event_001",
+    "category": "calendar",
+    "query": "What is the weekly sync about?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["cal_weekly_sync"],
+    "expected_source": "calendar",
+    "answer_must_include": ["launch blockers", "QA freeze"],
+    "documents": [
+      {
+        "id": "cal_weekly_sync",
+        "source": "calendar",
+        "title": "Weekly Sync",
+        "text": "Event: Weekly Sync\nStart: 2026-06-08T10:00:00Z\nDescription: Review launch blockers and QA freeze readiness.",
+        "relevant": true
+      },
+      {
+        "id": "drive_sync_notes",
+        "source": "drive",
+        "title": "Sync Notes",
+        "text": "Notes from a past sync mention team rituals but not the upcoming agenda.",
+        "relevant": false
+      },
+      {
+        "id": "security_review",
+        "source": "calendar",
+        "title": "Security Review",
+        "text": "Event: Security Review\nDescription: Review auth token encryption and audit questions.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "calendar_date_001",
+    "category": "calendar",
+    "query": "Which event on June 10 covers the security review?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["cal_security_review"],
+    "expected_source": "calendar",
+    "answer_must_include": ["Security Review", "June 10"],
+    "documents": [
+      {
+        "id": "cal_security_review",
+        "source": "calendar",
+        "title": "Security Review",
+        "text": "Event: Security Review\nStart: 2026-06-10T15:00:00Z\nDescription: Review OAuth scopes, encrypted credentials, and CSRF handling.",
+        "relevant": true
+      },
+      {
+        "id": "security_faq",
+        "source": "drive",
+        "title": "Security FAQ",
+        "text": "FAQ explains session cookies, CSRF tokens, and credential encryption.",
+        "relevant": false
+      },
+      {
+        "id": "cal_launch_demo",
+        "source": "calendar",
+        "title": "Launch Demo",
+        "text": "Event: Launch Demo\nStart: 2026-06-10T11:00:00Z\nDescription: Walk through product launch demo script.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "source_specific_calendar_001",
+    "category": "source_specific",
+    "query": "Search calendar for launch demo",
+    "expected_behavior": "answerable",
+    "source_filter": "calendar",
+    "expected_doc_ids": ["cal_launch_demo"],
+    "expected_source": "calendar",
+    "answer_must_include": ["Launch Demo"],
+    "documents": [
+      {
+        "id": "drive_launch_demo",
+        "source": "drive",
+        "title": "Launch Demo Script",
+        "text": "Drive document contains the launch demo talk track and slide order.",
+        "relevant": false
+      },
+      {
+        "id": "cal_launch_demo",
+        "source": "calendar",
+        "title": "Launch Demo",
+        "text": "Event: Launch Demo\nStart: 2026-06-10T11:00:00Z\nDescription: Present launch demo and collect customer feedback.",
+        "relevant": true
+      },
+      {
+        "id": "cal_security_review_2",
+        "source": "calendar",
+        "title": "Security Review",
+        "text": "Event: Security Review\nDescription: Discuss credential rotation.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "mixed_event_doc_001",
+    "category": "mixed",
+    "query": "What should I read before the launch demo?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["drive_launch_demo_script", "cal_launch_demo_brief"],
+    "expected_source": "drive",
+    "answer_must_include": ["demo script"],
+    "documents": [
+      {
+        "id": "cal_launch_demo_brief",
+        "source": "calendar",
+        "title": "Launch Demo",
+        "text": "Event: Launch Demo\nDescription: Review demo script before customer walkthrough.",
+        "relevant": true
+      },
+      {
+        "id": "drive_launch_demo_script",
+        "source": "drive",
+        "title": "Launch Demo Script",
+        "text": "The demo script lists customer workflow, launch milestones, and fallback talking points.",
+        "relevant": true
+      },
+      {
+        "id": "retro_demo_feedback",
+        "source": "drive",
+        "title": "Old Demo Feedback",
+        "text": "Retro feedback from last quarter mentions pacing and telemetry screenshots.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "conflicting_docs_001",
+    "category": "conflict",
+    "query": "What is the current QA freeze date?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["launch_plan_new"],
+    "expected_source": "drive",
+    "answer_must_include": ["May 2"],
+    "documents": [
+      {
+        "id": "launch_plan_old",
+        "source": "drive",
+        "title": "Launch Plan Old",
+        "text": "Old launch plan says QA freeze is April 29. This document was superseded.",
+        "relevant": false
+      },
+      {
+        "id": "launch_plan_new",
+        "source": "drive",
+        "title": "Launch Plan Current",
+        "text": "Current launch plan says QA freeze is May 2 and design freeze is April 18.",
+        "relevant": true
+      },
+      {
+        "id": "qa_retro",
+        "source": "drive",
+        "title": "QA Retro",
+        "text": "QA retro discusses test coverage after the freeze.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "unknown_answer_001",
+    "category": "unknown",
+    "query": "What is the office Wi-Fi password?",
+    "expected_behavior": "unknown",
+    "expected_doc_ids": [],
+    "expected_source": null,
+    "answer_must_include": [],
+    "documents": [
+      {
+        "id": "office_faq_wifi",
+        "source": "drive",
+        "title": "Office FAQ",
+        "text": "Office FAQ covers guest badges and desk booking but does not include Wi-Fi passwords.",
+        "relevant": false
+      },
+      {
+        "id": "security_policy",
+        "source": "drive",
+        "title": "Security Policy",
+        "text": "Security policy says secrets must not be stored in shared documents.",
+        "relevant": false
+      },
+      {
+        "id": "calendar_office_hours",
+        "source": "calendar",
+        "title": "Office Hours",
+        "text": "Event: Office Hours\nDescription: Ask questions about launch timeline and onboarding.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "similar_distractors_001",
+    "category": "distractors",
+    "query": "Which document explains the customer beta timeline?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["customer_beta_timeline"],
+    "expected_source": "drive",
+    "answer_must_include": ["beta timeline"],
+    "documents": [
+      {
+        "id": "customer_beta_timeline",
+        "source": "drive",
+        "title": "Customer Beta Timeline",
+        "text": "Customer beta timeline starts with invite emails, then onboarding calls, then telemetry review.",
+        "relevant": true
+      },
+      {
+        "id": "customer_update_plan_2",
+        "source": "drive",
+        "title": "Customer Update Plan",
+        "text": "Customer update emails are owned by Priya with support from Leo.",
+        "relevant": false
+      },
+      {
+        "id": "launch_timeline",
+        "source": "drive",
+        "title": "Launch Timeline",
+        "text": "Launch timeline covers design freeze, QA freeze, and go-live readiness.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "faq_query_001",
+    "category": "faq",
+    "query": "What does the FAQ say about support escalation?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["support_faq"],
+    "expected_source": "drive",
+    "answer_must_include": ["pager"],
+    "documents": [
+      {
+        "id": "support_faq",
+        "source": "drive",
+        "title": "Support FAQ",
+        "text": "FAQ says support escalation starts in the shared pager channel, then moves to incident review if unresolved.",
+        "relevant": true
+      },
+      {
+        "id": "security_faq_2",
+        "source": "drive",
+        "title": "Security FAQ",
+        "text": "FAQ says credential rotation should happen every 90 days.",
+        "relevant": false
+      },
+      {
+        "id": "launch_faq",
+        "source": "drive",
+        "title": "Launch FAQ",
+        "text": "FAQ answers launch date, customer email cadence, and telemetry rollout.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "security_policy_001",
+    "category": "security",
+    "query": "How are credentials protected?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["security_credentials"],
+    "expected_source": "drive",
+    "answer_must_include": ["encrypted"],
+    "documents": [
+      {
+        "id": "security_credentials",
+        "source": "drive",
+        "title": "Credential Security",
+        "text": "Security policy requires Google credentials to be encrypted at rest and access scoped per user.",
+        "relevant": true
+      },
+      {
+        "id": "auth_retro",
+        "source": "drive",
+        "title": "Auth Retro",
+        "text": "Retro says login copy should be clearer during onboarding.",
+        "relevant": false
+      },
+      {
+        "id": "customer_security_faq",
+        "source": "drive",
+        "title": "Customer Security FAQ",
+        "text": "FAQ gives customer-facing answers about data retention.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "calendar_owner_001",
+    "category": "calendar",
+    "query": "Who is attending the telemetry review?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["cal_telemetry_review"],
+    "expected_source": "calendar",
+    "answer_must_include": ["Mina", "Leo"],
+    "documents": [
+      {
+        "id": "cal_telemetry_review",
+        "source": "calendar",
+        "title": "Telemetry Review",
+        "text": "Event: Telemetry Review\nStart: 2026-06-12T16:00:00Z\nAttendees: Mina, Leo\nDescription: Review launch telemetry dashboards.",
+        "relevant": true
+      },
+      {
+        "id": "telemetry_dashboard_doc",
+        "source": "drive",
+        "title": "Telemetry Dashboard",
+        "text": "Dashboard doc explains launch telemetry metrics and alert thresholds.",
+        "relevant": false
+      },
+      {
+        "id": "cal_customer_update",
+        "source": "calendar",
+        "title": "Customer Update",
+        "text": "Event: Customer Update\nAttendees: Priya, Leo\nDescription: Draft customer email.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "multi_doc_001",
+    "category": "multi_doc",
+    "query": "What are the launch date and the owner for customer update emails?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["launch_plan_multidoc", "owners_marketing_multidoc"],
+    "expected_source": "drive",
+    "answer_must_include": ["May 2", "Priya"],
+    "documents": [
+      {
+        "id": "launch_plan_multidoc",
+        "source": "drive",
+        "title": "Launch Plan",
+        "text": "Launch plan says QA freeze is May 2 and launch readiness review is May 15.",
+        "relevant": true
+      },
+      {
+        "id": "owners_marketing_multidoc",
+        "source": "drive",
+        "title": "Marketing Owners",
+        "text": "Marketing plan assigns customer update emails to Priya with backups from Leo.",
+        "relevant": true
+      },
+      {
+        "id": "retro_multidoc",
+        "source": "drive",
+        "title": "Retro",
+        "text": "Retro notes mention telemetry improvements after launch.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "doc_id_query_001",
+    "category": "exact_id",
+    "query": "Find doc launch_plan_current",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["launch_plan_current"],
+    "expected_source": "drive",
+    "answer_must_include": ["Current launch plan"],
+    "documents": [
+      {
+        "id": "launch_plan_current",
+        "source": "drive",
+        "title": "Current Launch Plan",
+        "text": "Current launch plan says design freeze is April 18 and QA freeze is May 2.",
+        "relevant": true
+      },
+      {
+        "id": "launch_plan_archive",
+        "source": "drive",
+        "title": "Archived Launch Plan",
+        "text": "Archived launch plan has obsolete launch dates.",
+        "relevant": false
+      },
+      {
+        "id": "launch_retro_current",
+        "source": "drive",
+        "title": "Current Launch Retro",
+        "text": "Current launch retro highlights telemetry follow-up.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "calendar_source_filter_002",
+    "category": "source_specific",
+    "query": "telemetry review",
+    "expected_behavior": "answerable",
+    "source_filter": "calendar",
+    "expected_doc_ids": ["cal_telemetry_review_filter"],
+    "expected_source": "calendar",
+    "answer_must_include": ["Telemetry Review"],
+    "documents": [
+      {
+        "id": "drive_telemetry_review_filter",
+        "source": "drive",
+        "title": "Telemetry Review Notes",
+        "text": "Drive notes describe telemetry review outcomes after the meeting.",
+        "relevant": false
+      },
+      {
+        "id": "cal_telemetry_review_filter",
+        "source": "calendar",
+        "title": "Telemetry Review",
+        "text": "Event: Telemetry Review\nStart: 2026-06-12T16:00:00Z\nDescription: Review launch telemetry dashboards.",
+        "relevant": true
+      },
+      {
+        "id": "cal_retro_filter",
+        "source": "calendar",
+        "title": "Retro",
+        "text": "Event: Retro\nDescription: Discuss launch retro and support follow-up.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "stale_doc_001",
+    "category": "stale",
+    "query": "What is the newest customer email owner?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["customer_owner_new"],
+    "expected_source": "drive",
+    "answer_must_include": ["Priya"],
+    "documents": [
+      {
+        "id": "customer_owner_old",
+        "source": "drive",
+        "title": "Customer Owner Old",
+        "text": "Old customer update plan assigns customer update emails to Mira.",
+        "relevant": false
+      },
+      {
+        "id": "customer_owner_new",
+        "source": "drive",
+        "title": "Customer Owner Current",
+        "text": "Newest customer update plan assigns customer update emails to Priya with Leo as backup.",
+        "relevant": true
+      },
+      {
+        "id": "customer_faq_owner",
+        "source": "drive",
+        "title": "Customer FAQ",
+        "text": "FAQ describes customer email frequency but not the current owner.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "long_doc_boundary_001",
+    "category": "long_doc",
+    "query": "What launch risk is listed near the support mitigation?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["launch_risk_register"],
+    "expected_source": "drive",
+    "answer_must_include": ["support volume"],
+    "documents": [
+      {
+        "id": "launch_risk_register",
+        "source": "drive",
+        "title": "Launch Risk Register",
+        "text": "Launch risks include delayed QA signoff, telemetry gaps, and support volume spikes. Support mitigation adds weekend pager coverage and customer FAQ updates.",
+        "relevant": true
+      },
+      {
+        "id": "support_mitigation_notes",
+        "source": "drive",
+        "title": "Support Mitigation Notes",
+        "text": "Support mitigation notes list pager coverage but do not name the launch risk.",
+        "relevant": false
+      },
+      {
+        "id": "risk_retro",
+        "source": "drive",
+        "title": "Risk Retro",
+        "text": "Retro reviews risks that did not occur during launch.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "calendar_location_001",
+    "category": "calendar",
+    "query": "Where is the customer update meeting?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["cal_customer_update_location"],
+    "expected_source": "calendar",
+    "answer_must_include": ["Room 4B"],
+    "documents": [
+      {
+        "id": "cal_customer_update_location",
+        "source": "calendar",
+        "title": "Customer Update",
+        "text": "Event: Customer Update\nLocation: Room 4B\nDescription: Draft customer update emails and review launch FAQ.",
+        "relevant": true
+      },
+      {
+        "id": "customer_update_doc_location",
+        "source": "drive",
+        "title": "Customer Update Draft",
+        "text": "Draft customer update email explains launch timeline and support links.",
+        "relevant": false
+      },
+      {
+        "id": "cal_launch_room",
+        "source": "calendar",
+        "title": "Launch Room Setup",
+        "text": "Event: Launch Room Setup\nLocation: Room 2A\nDescription: Prepare launch demo equipment.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "unknown_answer_002",
+    "category": "unknown",
+    "query": "What is the CEO's personal phone number?",
+    "expected_behavior": "unknown",
+    "expected_doc_ids": [],
+    "expected_source": null,
+    "answer_must_include": [],
+    "documents": [
+      {
+        "id": "company_directory_policy",
+        "source": "drive",
+        "title": "Directory Policy",
+        "text": "Security policy says personal phone numbers must not be stored in shared docs.",
+        "relevant": false
+      },
+      {
+        "id": "executive_faq",
+        "source": "drive",
+        "title": "Executive FAQ",
+        "text": "FAQ lists public escalation aliases but no personal phone numbers.",
+        "relevant": false
+      },
+      {
+        "id": "cal_exec_review",
+        "source": "calendar",
+        "title": "Executive Review",
+        "text": "Event: Executive Review\nDescription: Review launch metrics and customer updates.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "semantic_policy_001",
+    "category": "drive_semantic",
+    "query": "What rule applies to secrets in shared files?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["security_secrets_policy"],
+    "expected_source": "drive",
+    "answer_must_include": ["must not be stored"],
+    "documents": [
+      {
+        "id": "security_secrets_policy",
+        "source": "drive",
+        "title": "Secrets Policy",
+        "text": "Security policy says secrets must not be stored in shared documents or customer-facing FAQ files.",
+        "relevant": true
+      },
+      {
+        "id": "credential_rotation",
+        "source": "drive",
+        "title": "Credential Rotation",
+        "text": "Credential rotation should happen every 90 days for production secrets.",
+        "relevant": false
+      },
+      {
+        "id": "shared_drive_faq",
+        "source": "drive",
+        "title": "Shared Drive FAQ",
+        "text": "FAQ explains how to request access to shared Drive folders.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "timeline_semantic_001",
+    "category": "drive_semantic",
+    "query": "What happens after QA freeze?",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["post_qa_timeline"],
+    "expected_source": "drive",
+    "answer_must_include": ["telemetry collection"],
+    "documents": [
+      {
+        "id": "post_qa_timeline",
+        "source": "drive",
+        "title": "Post QA Timeline",
+        "text": "Timeline says telemetry collection starts one week after QA freeze and customer emails follow after review.",
+        "relevant": true
+      },
+      {
+        "id": "qa_checklist_after",
+        "source": "drive",
+        "title": "QA Checklist",
+        "text": "QA checklist covers browsers, regression testing, and release signoff.",
+        "relevant": false
+      },
+      {
+        "id": "telemetry_retro_after",
+        "source": "drive",
+        "title": "Telemetry Retro",
+        "text": "Retro says telemetry dashboards were useful after launch.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "calendar_drive_ambiguous_001",
+    "category": "mixed",
+    "query": "launch retro",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["drive_launch_retro"],
+    "expected_source": "drive",
+    "answer_must_include": ["telemetry gaps"],
+    "documents": [
+      {
+        "id": "drive_launch_retro",
+        "source": "drive",
+        "title": "Launch Retro",
+        "text": "Launch retro highlights telemetry gaps, support response time, and customer FAQ improvements.",
+        "relevant": true
+      },
+      {
+        "id": "cal_launch_retro",
+        "source": "calendar",
+        "title": "Launch Retro",
+        "text": "Event: Launch Retro\nDescription: Meeting placeholder for retro discussion.",
+        "relevant": false
+      },
+      {
+        "id": "retro_template",
+        "source": "drive",
+        "title": "Retro Template",
+        "text": "Retro template lists prompts for wins, risks, and follow-up.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "source_specific_drive_001",
+    "category": "source_specific",
+    "query": "Search drive for security FAQ",
+    "expected_behavior": "answerable",
+    "source_filter": "drive",
+    "expected_doc_ids": ["drive_security_faq_filter"],
+    "expected_source": "drive",
+    "answer_must_include": ["CSRF"],
+    "documents": [
+      {
+        "id": "drive_security_faq_filter",
+        "source": "drive",
+        "title": "Security FAQ",
+        "text": "Security FAQ explains CSRF protection, encrypted Google credentials, and session cookies.",
+        "relevant": true
+      },
+      {
+        "id": "cal_security_faq_filter",
+        "source": "calendar",
+        "title": "Security FAQ Review",
+        "text": "Event: Security FAQ Review\nDescription: Review security FAQ with support.",
+        "relevant": false
+      },
+      {
+        "id": "drive_security_retro_filter",
+        "source": "drive",
+        "title": "Security Retro",
+        "text": "Security retro mentions future auth work but not CSRF details.",
+        "relevant": false
+      }
+    ]
+  }
+]

@@ -5,6 +5,7 @@ import {
   CalendarIcon,
   DriveIcon,
   RefreshIcon,
+  RelevantIcon,
   SearchIcon,
   SourcesIcon,
   SparkIcon,
@@ -399,6 +400,97 @@ export function RelevantPanel({ relevant, relevantLoading, relevantError, loadRe
   );
 }
 
+function RelevantDocChip({ doc, index }) {
+  const label = doc.title || doc.name || "Untitled";
+  const score = typeof doc.score === "number" ? doc.score : typeof doc.confidence === "number" ? doc.confidence : null;
+  const content = (
+    <>
+      <span className="relevant-doc-index">{index + 1}</span>
+      <span className="relevant-doc-title">{label}</span>
+      {score !== null && <span className="relevant-doc-score">{Math.round(score * 100)}%</span>}
+    </>
+  );
+
+  if (doc.link) {
+    return (
+      <a className="relevant-doc-chip" href={doc.link} target="_blank" rel="noreferrer">
+        {content}
+      </a>
+    );
+  }
+
+  return <span className="relevant-doc-chip">{content}</span>;
+}
+
+function RelevantEventItem({ item, index }) {
+  const event = item.event || {};
+  const docs = item.docs || [];
+  const eventTime = event.start_time || event.start || "";
+  const location = event.location || "";
+
+  return (
+    <article className="relevant-event">
+      <div className="relevant-event-marker">
+        <span>{index + 1}</span>
+      </div>
+      <div className="relevant-event-content">
+        <div className="relevant-event-kicker">
+          <CalendarIcon />
+          <span>{eventTime || "Upcoming"}</span>
+          {location && <span>{location}</span>}
+        </div>
+        <h3>{event.title || "(No title)"}</h3>
+        {docs.length > 0 ? (
+          <div className="relevant-doc-list">
+            {docs.slice(0, 5).map((doc, docIndex) => (
+              <RelevantDocChip key={doc.link || doc.title || docIndex} doc={doc} index={docIndex} />
+            ))}
+          </div>
+        ) : (
+          <div className="relevant-event-note">No matched docs for this event yet.</div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function RelevantPageSkeleton() {
+  return (
+    <div className="relevant-agenda relevant-skeleton" aria-label="Loading relevant context">
+      {[0, 1, 2].map((item) => (
+        <div key={item} className="relevant-event">
+          <div className="relevant-event-marker skeleton-marker" />
+          <div className="relevant-event-content">
+            <div className="skeleton-line short" />
+            <div className="skeleton-line wide" />
+            <div className="relevant-doc-list">
+              <div className="skeleton-pill" />
+              <div className="skeleton-pill" />
+              <div className="skeleton-pill short" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RelevantPageEmpty({ loadRelevantNow, relevantLoading }) {
+  return (
+    <div className="relevant-empty">
+      <div className="empty-icon relevant-empty-icon">
+        <CalendarIcon />
+      </div>
+      <h3>No upcoming context</h3>
+      <p>Calendar matches will appear here when upcoming events have related Drive or Calendar context.</p>
+      <button className={`secondary-button icon-label-button${relevantLoading ? " is-loading" : ""}`} type="button" onClick={loadRelevantNow} disabled={relevantLoading}>
+        <RefreshIcon />
+        Refresh
+      </button>
+    </div>
+  );
+}
+
 export function SourcesSummaryPanel({ driveStatus, calendarStatus, ingestError, lastDriveJob, onDriveSync, onOpenSources }) {
   return (
     <Panel title="Sources" subtitle="Connection and ingest status." accent="green" icon={SourcesIcon}>
@@ -657,10 +749,39 @@ function SearchResult({ hit }) {
   );
 }
 
-export function RelevantView(props) {
+export function RelevantView({ relevant = [], relevantLoading, relevantError, loadRelevantNow }) {
   return (
-    <main className="single-view">
-      <RelevantPanel {...props} />
+    <main className="single-view relevant-page">
+      <section className="relevant-canvas">
+        <div className="relevant-hero">
+          <div className="relevant-hero-copy">
+            <span className="panel-icon relevant-hero-icon">
+              <RelevantIcon />
+            </span>
+            <div>
+              <h2>Relevant Now</h2>
+              <p>Upcoming events paired with the workspace context you are most likely to need.</p>
+            </div>
+          </div>
+          <button className={`secondary-button icon-label-button relevant-refresh-button${relevantLoading ? " is-loading" : ""}`} type="button" onClick={loadRelevantNow} disabled={relevantLoading}>
+            <RefreshIcon />
+            Refresh
+          </button>
+        </div>
+
+        {relevantError && <div className="error-text relevant-error">{relevantError}</div>}
+        {relevantLoading && <RelevantPageSkeleton />}
+        {!relevantLoading && !relevantError && relevant.length === 0 && (
+          <RelevantPageEmpty loadRelevantNow={loadRelevantNow} relevantLoading={relevantLoading} />
+        )}
+        {!relevantLoading && !relevantError && relevant.length > 0 && (
+          <div className="relevant-agenda">
+            {relevant.slice(0, 8).map((item, index) => (
+              <RelevantEventItem key={item.event?.id || item.event?.title || index} item={item} index={index} />
+            ))}
+          </div>
+        )}
+      </section>
     </main>
   );
 }

@@ -4,11 +4,13 @@ import {
   AskIcon,
   CalendarIcon,
   DriveIcon,
+  MoonIcon,
   RefreshIcon,
   RelevantIcon,
   SearchIcon,
   SettingsIcon,
   SourcesIcon,
+  SunIcon,
 } from "./Icons";
 
 const navItems = [
@@ -20,7 +22,9 @@ const navItems = [
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
-function Sidebar({ activeSection, onSelect }) {
+function Sidebar({ activeSection, onSelect, theme, onToggleTheme }) {
+  const isLight = theme === "light";
+
   return (
     <aside className="az-sidebar">
       <div className="az-logo" aria-label="Azeryn">
@@ -47,6 +51,20 @@ function Sidebar({ activeSection, onSelect }) {
           );
         })}
       </nav>
+      <div className="az-sidebar-footer">
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={onToggleTheme}
+          aria-pressed={isLight}
+          title={isLight ? "Switch to dark mode" : "Switch to light mode"}
+        >
+          <span className="theme-toggle-track" aria-hidden="true">
+            <span className="theme-toggle-thumb">{isLight ? <SunIcon /> : <MoonIcon />}</span>
+          </span>
+          <span className="theme-toggle-label">{isLight ? "Light mode" : "Dark mode"}</span>
+        </button>
+      </div>
     </aside>
   );
 }
@@ -66,11 +84,13 @@ export default function AppShell({
   initials,
   actions,
   pageTitle,
+  theme,
+  onToggleTheme,
   children,
 }) {
   return (
     <div className="az-app">
-      <Sidebar activeSection={activeSection} onSelect={onSelectSection} />
+      <Sidebar activeSection={activeSection} onSelect={onSelectSection} theme={theme} onToggleTheme={onToggleTheme} />
       <div className="az-workspace">
         <header className="az-topbar">
           <div className="top-page-title">

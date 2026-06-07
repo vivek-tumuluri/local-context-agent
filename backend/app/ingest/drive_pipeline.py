@@ -14,7 +14,7 @@ try:
 except Exception:  # pragma: no cover - defensive import
     _legacy_split_by_chars = None
 split_by_chars = _legacy_split_by_chars  # allow monkeypatching in tests
-from app.rag.chunk import chunk_text
+from app.rag.chunk import build_retrieval_prefix, chunk_text
 from app.rag import vector_store as vector
 from app.core.logging_utils import log_event
 from app.core.metrics import StageTimer
@@ -295,6 +295,13 @@ def _build_drive_chunk_meta(file_meta: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _prefix_chunk_text(prefix: str, text: str) -> str:
+    body = (text or "").strip()
+    if prefix:
+        return f"{prefix}\n\n{body}"[: vector.MAX_CHARS_PER_CHUNK]
+    return body[: vector.MAX_CHARS_PER_CHUNK]
+
+
 def _build_chunk_rows(
     user_id: str,
     doc_id: str,
@@ -305,6 +312,14 @@ def _build_chunk_rows(
     base_meta = {"user_id": user_id, "doc_id": doc_id, "content_hash": content_hash, "source": "drive"}
     if doc_meta:
         base_meta.update({k: v for k, v in doc_meta.items() if v is not None})
+    prefix = build_retrieval_prefix(
+        [
+            ("Title", base_meta.get("title")),
+            ("Source", base_meta.get("source")),
+            ("Document ID", base_meta.get("doc_id")),
+            ("MIME", base_meta.get("mime_type")),
+        ]
+    )
 
     # Legacy hook for tests/overrides: if split_by_chars is monkeypatched, use it.
     legacy_splitter = globals().get("split_by_chars") or _legacy_split_by_chars
@@ -335,7 +350,7 @@ def _build_chunk_rows(
         rows.append(
             {
                 "id": cid,
-                "text": (ch.get("text") or "")[: vector.MAX_CHARS_PER_CHUNK],
+                "text": _prefix_chunk_text(prefix, ch.get("text") or ""),
                 "meta": ch.get("meta", {}),
             }
         )

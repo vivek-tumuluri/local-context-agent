@@ -296,8 +296,9 @@ def upsert(chunks: List[Dict[str, Any]], user_id: str) -> Dict[str, Any]:
     return summary
 
 
-def query(q: str, user_id: str, k: int = 5) -> List[Dict[str, Any]]:
+def query(q: str, user_id: str, k: int = 5, source: Optional[str] = None) -> List[Dict[str, Any]]:
     normalized_user = _normalize_user(user_id)
+    source_filter = source.strip().lower() if source else None
     vecs = _embed_with_retry([q])
     if not vecs:
         return []
@@ -307,6 +308,9 @@ def query(q: str, user_id: str, k: int = 5) -> List[Dict[str, Any]]:
         _assert_postgres(session)
         if _is_postgres_session(session):
             distance = DocChunk.embedding.l2_distance(query_vec)
+            filters = [DocChunk.user_id == normalized_user]
+            if source_filter:
+                filters.append(DocChunk.source == source_filter)
             stmt = (
                 select(
                     DocChunk.id,
@@ -314,12 +318,15 @@ def query(q: str, user_id: str, k: int = 5) -> List[Dict[str, Any]]:
                     DocChunk.chunk_metadata,
                     distance.label("distance"),
                 )
-                .where(DocChunk.user_id == normalized_user)
+                .where(*filters)
                 .order_by(distance)
                 .limit(k)
             )
             rows = session.execute(stmt).all()
         else:
+            filters = [DocChunk.user_id == normalized_user]
+            if source_filter:
+                filters.append(DocChunk.source == source_filter)
             stmt = (
                 select(
                     DocChunk.id,
@@ -327,7 +334,7 @@ def query(q: str, user_id: str, k: int = 5) -> List[Dict[str, Any]]:
                     DocChunk.chunk_metadata,
                     DocChunk.embedding,
                 )
-                .where(DocChunk.user_id == normalized_user)
+                .where(*filters)
             )
             results = session.execute(stmt).all()
             scored: List[Tuple[float, Any]] = []

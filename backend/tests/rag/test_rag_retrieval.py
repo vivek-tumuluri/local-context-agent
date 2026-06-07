@@ -22,7 +22,7 @@ async def test_rag_search_returns_expected_hits(api_client, monkeypatch, test_us
         },
     ]
 
-    monkeypatch.setattr("app.routes.rag_routes.vec_query", lambda q, k, user_id: list(fake_hits))
+    monkeypatch.setattr("app.routes.rag_routes.hybrid_query", lambda q, k, user_id, source=None: list(fake_hits))
 
     resp = await api_client.post("/rag/search", json={"query": "alpha", "k": 2})
     assert resp.status_code == 200

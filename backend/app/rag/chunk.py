@@ -1,6 +1,6 @@
 from __future__ import annotations
 import re
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Sequence, Tuple, Optional
 
 
 
@@ -27,6 +27,21 @@ def _normalize(text: str) -> str:
 
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def build_retrieval_prefix(fields: Sequence[Tuple[str, Any]], max_chars: int = 600) -> str:
+    lines: List[str] = []
+    for label, value in fields:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        lines.append(f"{label}: {text}")
+    prefix = "\n".join(lines).strip()
+    if max_chars > 0 and len(prefix) > max_chars:
+        return prefix[:max_chars].rstrip()
+    return prefix
 
 
 
@@ -257,4 +272,3 @@ def chunk_text(
             }
         })
     return out
-

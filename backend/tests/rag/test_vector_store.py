@@ -21,6 +21,28 @@ def test_upsert_query_and_list_ids(fake_vector_env):
     assert {h["meta"]["doc_id"] for h in hits} == {"doc1", "doc2"}
 
 
+def test_query_filters_by_source(fake_vector_env):
+    chunks = [
+        {
+            "id": "source-drive-0",
+            "text": "Launch plan draft outlines QA freeze.",
+            "meta": {"doc_id": "source-drive", "source": "drive"},
+        },
+        {
+            "id": "source-calendar-0",
+            "text": "Calendar meeting reviews launch plan and QA freeze.",
+            "meta": {"doc_id": "source-calendar", "source": "calendar"},
+        },
+    ]
+    vector.upsert(chunks, user_id="source-user")
+
+    hits = vector.query("launch plan", k=5, user_id="source-user", source="calendar")
+
+    assert hits
+    assert {hit["meta"]["source"] for hit in hits} == {"calendar"}
+    assert {hit["meta"]["doc_id"] for hit in hits} == {"source-calendar"}
+
+
 def test_delete_paths(fake_vector_env):
     chunks = [
         {"id": "docA-0", "text": "Alpha text", "meta": {"doc_id": "docA"}},

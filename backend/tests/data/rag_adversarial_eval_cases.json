@@ -1,0 +1,685 @@
+[
+  {
+    "id": "adv_exact_file_title_security_faq_001",
+    "category": "exact_file_title",
+    "query": "Security FAQ",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_security_faq"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_security_faq",
+        "source": "drive",
+        "title": "Security FAQ",
+        "text": "Credential storage uses encrypted OAuth tokens and strict CSRF checks.",
+        "relevant": true
+      },
+      {
+        "id": "adv_oauth_review",
+        "source": "drive",
+        "title": "OAuth Review Notes",
+        "text": "Authentication review covers token exchange, cookie lifetime, and encryption posture.",
+        "relevant": false
+      },
+      {
+        "id": "adv_incident_process",
+        "source": "drive",
+        "title": "Incident Process",
+        "text": "Security incidents follow escalation, severity labels, and postmortem review.",
+        "relevant": false
+      },
+      {
+        "id": "adv_access_controls",
+        "source": "drive",
+        "title": "Access Controls",
+        "text": "Role grants are reviewed monthly for admin users and integration accounts.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_exact_file_title_customer_update_001",
+    "category": "exact_file_title",
+    "query": "Customer Update Plan",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_customer_update_plan"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_customer_update_plan",
+        "source": "drive",
+        "title": "Customer Update Plan",
+        "text": "Priya owns rollout emails, Leo covers backup approval, and Finance reviews pricing language.",
+        "relevant": true
+      },
+      {
+        "id": "adv_customer_health",
+        "source": "drive",
+        "title": "Customer Health Review",
+        "text": "Accounts are grouped by renewal timing, support volume, and usage trend.",
+        "relevant": false
+      },
+      {
+        "id": "adv_launch_comms",
+        "source": "drive",
+        "title": "Launch Communications",
+        "text": "The launch email template announces feature availability and support contacts.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_weird_acronym_qbr_001",
+    "category": "weird_acronym",
+    "query": "QBR",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_qbr_packet"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_qbr_packet",
+        "source": "drive",
+        "title": "QBR Packet",
+        "text": "Quarterly account slides include expansion risk, renewal blockers, and executive asks.",
+        "relevant": true
+      },
+      {
+        "id": "adv_account_review",
+        "source": "drive",
+        "title": "Enterprise Account Review",
+        "text": "Revenue review covers renewal blockers, usage trends, and executive followups.",
+        "relevant": false
+      },
+      {
+        "id": "adv_sales_pipeline",
+        "source": "drive",
+        "title": "Sales Pipeline",
+        "text": "Forecast notes include expansion risk and procurement status.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_weird_acronym_rca_001",
+    "category": "weird_acronym",
+    "query": "RCA",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_rca_template"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_rca_template",
+        "source": "drive",
+        "title": "RCA Template",
+        "text": "Incident analysis must include customer impact, detection time, contributing factors, and corrective actions.",
+        "relevant": true
+      },
+      {
+        "id": "adv_outage_review",
+        "source": "drive",
+        "title": "Outage Review",
+        "text": "The reliability note summarizes incident analysis and corrective actions from the paging event.",
+        "relevant": false
+      },
+      {
+        "id": "adv_pager_policy",
+        "source": "drive",
+        "title": "Pager Policy",
+        "text": "On-call escalation uses severity labels, response windows, and owner handoff rules.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_person_professor_hwang_001",
+    "category": "person_name",
+    "query": "Professor Hwang",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_professor_hwang_notes"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_professor_hwang_notes",
+        "source": "drive",
+        "title": "Professor Hwang Research Notes",
+        "text": "The advisor requested a tighter ablation table and a clearer explanation of retrieval grounding.",
+        "relevant": true
+      },
+      {
+        "id": "adv_research_ablation",
+        "source": "drive",
+        "title": "Ablation Study Draft",
+        "text": "The experiment draft compares dense search, hybrid ranking, and citation coverage.",
+        "relevant": false
+      },
+      {
+        "id": "adv_advisor_meeting",
+        "source": "calendar",
+        "title": "Advisor Meeting",
+        "text": "Event: Advisor Meeting\nDescription: Review ablation table and next paper draft.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_person_mina_patel_001",
+    "category": "person_name",
+    "query": "Mina Patel",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_mina_patel_owner"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_mina_patel_owner",
+        "source": "drive",
+        "title": "Mina Patel Owner Notes",
+        "text": "Threat modeling signoff is assigned to the platform security lead before launch approval.",
+        "relevant": true
+      },
+      {
+        "id": "adv_security_owners",
+        "source": "drive",
+        "title": "Security Owners",
+        "text": "Threat modeling and audit log review need named owners before launch approval.",
+        "relevant": false
+      },
+      {
+        "id": "adv_platform_review",
+        "source": "drive",
+        "title": "Platform Review",
+        "text": "Platform readiness includes audit logs, token storage, and authorization checks.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_project_atlas_001",
+    "category": "project_name",
+    "query": "Project Atlas",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_project_atlas_brief"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_project_atlas_brief",
+        "source": "drive",
+        "title": "Project Atlas Brief",
+        "text": "The migration groups workspace content by customer account and preserves source citations.",
+        "relevant": true
+      },
+      {
+        "id": "adv_workspace_migration",
+        "source": "drive",
+        "title": "Workspace Migration",
+        "text": "Migration work groups content by account and preserves citations for launch review.",
+        "relevant": false
+      },
+      {
+        "id": "adv_project_orion",
+        "source": "drive",
+        "title": "Project Orion Brief",
+        "text": "The analytics pipeline tracks usage cohorts and dashboard adoption.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_project_nebula_sync_001",
+    "category": "project_name",
+    "query": "Nebula Sync",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_nebula_sync_plan"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_nebula_sync_plan",
+        "source": "drive",
+        "title": "Nebula Sync Plan",
+        "text": "Calendar and Drive backfill should pause during credential rotation and resume after audit checks.",
+        "relevant": true
+      },
+      {
+        "id": "adv_sync_reliability",
+        "source": "drive",
+        "title": "Sync Reliability",
+        "text": "Backfill workers retry Drive and Calendar jobs after credential rotation.",
+        "relevant": false
+      },
+      {
+        "id": "adv_calendar_backfill",
+        "source": "calendar",
+        "title": "Calendar Backfill Review",
+        "text": "Event: Calendar Backfill Review\nDescription: Discuss retry windows and worker health.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_quoted_phrase_rollback_001",
+    "category": "quoted_phrase",
+    "query": "\"rollback window closes\"",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_release_runbook"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_release_runbook",
+        "source": "drive",
+        "title": "Release Runbook",
+        "text": "The rollback window closes at 18:00 UTC after support confirms no priority regressions.",
+        "relevant": true
+      },
+      {
+        "id": "adv_release_checklist",
+        "source": "drive",
+        "title": "Release Checklist",
+        "text": "The deployment checklist has rollback owners, support windows, and regression checks.",
+        "relevant": false
+      },
+      {
+        "id": "adv_support_handoff",
+        "source": "drive",
+        "title": "Support Handoff",
+        "text": "Support closes priority issues after the release window and posts customer updates.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_quoted_phrase_snowflake_001",
+    "category": "quoted_phrase",
+    "query": "\"snowflake import is paused\"",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_data_freeze_notes"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_data_freeze_notes",
+        "source": "drive",
+        "title": "Data Freeze Notes",
+        "text": "During the billing migration, snowflake import is paused until validation snapshots match.",
+        "relevant": true
+      },
+      {
+        "id": "adv_data_validation",
+        "source": "drive",
+        "title": "Data Validation",
+        "text": "Validation snapshots compare warehouse exports and billing totals after migration.",
+        "relevant": false
+      },
+      {
+        "id": "adv_import_health",
+        "source": "drive",
+        "title": "Import Health",
+        "text": "Import workers pause when retry queues exceed the operational threshold.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_document_id_lc1427_001",
+    "category": "document_id",
+    "query": "LC-1427",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["LC-1427"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "LC-1427",
+        "source": "drive",
+        "title": "Launch Exception Memo",
+        "text": "Design freeze is waived for the billing copy update, but QA signoff remains required.",
+        "relevant": true
+      },
+      {
+        "id": "LC-1409",
+        "source": "drive",
+        "title": "Launch Readiness Memo",
+        "text": "QA signoff and design freeze are required before the launch approval meeting.",
+        "relevant": false
+      },
+      {
+        "id": "adv_billing_copy",
+        "source": "drive",
+        "title": "Billing Copy Update",
+        "text": "Billing copy changes require legal review and customer support notification.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_document_id_doc9f3a_001",
+    "category": "document_id",
+    "query": "DOC-9F3A",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["DOC-9F3A"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "DOC-9F3A",
+        "source": "drive",
+        "title": "Credential Rotation Appendix",
+        "text": "OAuth refresh tokens rotate after the owner reconnects Drive and Calendar permissions.",
+        "relevant": true
+      },
+      {
+        "id": "DOC-4A1B",
+        "source": "drive",
+        "title": "Credential Rotation Notes",
+        "text": "OAuth permissions and token rotation are reviewed during security readiness.",
+        "relevant": false
+      },
+      {
+        "id": "adv_oauth_scopes",
+        "source": "drive",
+        "title": "OAuth Scope Inventory",
+        "text": "Drive and Calendar scopes are listed with approval status and product owner.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_calendar_event_title_security_review_001",
+    "category": "calendar_event_title",
+    "query": "Security Review",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_cal_security_review"],
+    "expected_source": "calendar",
+    "source_filter": "calendar",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_cal_security_review",
+        "source": "calendar",
+        "title": "Security Review",
+        "text": "Event: Security Review\nStart: 2026-06-10T15:00:00Z\nDescription: Review encrypted credentials, CSRF checks, and OAuth scope approval.",
+        "relevant": true
+      },
+      {
+        "id": "adv_drive_security_review",
+        "source": "drive",
+        "title": "Security Review Notes",
+        "text": "Drive notes summarize credential encryption and authorization checks from the last review.",
+        "relevant": false
+      },
+      {
+        "id": "adv_cal_auth_sync",
+        "source": "calendar",
+        "title": "Auth Sync",
+        "text": "Event: Auth Sync\nDescription: Discuss login reliability and session cookies.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_calendar_event_title_qbr_001",
+    "category": "calendar_event_title",
+    "query": "QBR Prep",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_cal_qbr_prep"],
+    "expected_source": "calendar",
+    "source_filter": "calendar",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_cal_qbr_prep",
+        "source": "calendar",
+        "title": "QBR Prep",
+        "text": "Event: QBR Prep\nStart: 2026-06-12T18:00:00Z\nDescription: Confirm expansion risk slides and renewal blockers.",
+        "relevant": true
+      },
+      {
+        "id": "adv_drive_qbr_packet",
+        "source": "drive",
+        "title": "QBR Packet",
+        "text": "The packet has renewal blocker slides and customer health notes.",
+        "relevant": false
+      },
+      {
+        "id": "adv_cal_revenue_review",
+        "source": "calendar",
+        "title": "Revenue Review",
+        "text": "Event: Revenue Review\nDescription: Discuss customer expansion and renewal health.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_short_query_atlas_001",
+    "category": "short_query",
+    "query": "Atlas",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_atlas_retrospective"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_atlas_retrospective",
+        "source": "drive",
+        "title": "Atlas Retrospective",
+        "text": "The customer grouping migration improved citation coverage but exposed stale workspace aliases.",
+        "relevant": true
+      },
+      {
+        "id": "adv_workspace_retro",
+        "source": "drive",
+        "title": "Workspace Retrospective",
+        "text": "The migration improved citation coverage and surfaced stale aliases.",
+        "relevant": false
+      },
+      {
+        "id": "adv_customer_grouping",
+        "source": "drive",
+        "title": "Customer Grouping Notes",
+        "text": "Workspace aliases and account grouping rules are reviewed before launch.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_short_query_hwang_001",
+    "category": "short_query",
+    "query": "Hwang",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_hwang_meeting"],
+    "expected_source": "calendar",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_hwang_meeting",
+        "source": "calendar",
+        "title": "Hwang Meeting",
+        "text": "Event: Hwang Meeting\nDescription: Discuss ablation table and retrieval grounding examples.",
+        "relevant": true
+      },
+      {
+        "id": "adv_ablation_review",
+        "source": "calendar",
+        "title": "Ablation Review",
+        "text": "Event: Ablation Review\nDescription: Discuss retrieval grounding and experiment tables.",
+        "relevant": false
+      },
+      {
+        "id": "adv_paper_notes",
+        "source": "drive",
+        "title": "Paper Notes",
+        "text": "The paper needs clearer retrieval grounding examples and more careful evaluation.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_vague_lexical_atlas_notes_001",
+    "category": "vague_lexically_precise",
+    "query": "the Atlas notes",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_atlas_notes"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_atlas_notes",
+        "source": "drive",
+        "title": "Atlas Notes",
+        "text": "Workspace clustering should preserve file title, owner, source, and updated timestamp in citations.",
+        "relevant": true
+      },
+      {
+        "id": "adv_retrieval_notes",
+        "source": "drive",
+        "title": "Retrieval Notes",
+        "text": "Workspace clustering preserves file titles, owners, sources, and updated timestamps.",
+        "relevant": false
+      },
+      {
+        "id": "adv_project_summary",
+        "source": "drive",
+        "title": "Project Summary",
+        "text": "The project summary explains citation fields and document grouping.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_vague_lexical_calendar_sync_001",
+    "category": "vague_lexically_precise",
+    "query": "the Sync thing",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_sync_thing"],
+    "expected_source": "calendar",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_sync_thing",
+        "source": "calendar",
+        "title": "Sync Thing",
+        "text": "Event: Sync Thing\nDescription: Review Drive and Calendar stale cursor handling.",
+        "relevant": true
+      },
+      {
+        "id": "adv_cursor_review",
+        "source": "drive",
+        "title": "Cursor Review",
+        "text": "Drive and Calendar stale cursor handling needs better logs and retry windows.",
+        "relevant": false
+      },
+      {
+        "id": "adv_calendar_health",
+        "source": "calendar",
+        "title": "Calendar Health",
+        "text": "Event: Calendar Health\nDescription: Review retry windows and sync worker status.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_document_id_calendar_001",
+    "category": "document_id",
+    "query": "cal_2026_06_10_security_review",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["cal_2026_06_10_security_review"],
+    "expected_source": "calendar",
+    "source_filter": "calendar",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "cal_2026_06_10_security_review",
+        "source": "calendar",
+        "title": "Security Review",
+        "text": "Event: Security Review\nStart: 2026-06-10T15:00:00Z\nDescription: Review OAuth scopes and credential storage.",
+        "relevant": true
+      },
+      {
+        "id": "cal_2026_06_10_launch_review",
+        "source": "calendar",
+        "title": "Launch Review",
+        "text": "Event: Launch Review\nStart: 2026-06-10T15:00:00Z\nDescription: Review QA freeze and customer launch blockers.",
+        "relevant": false
+      },
+      {
+        "id": "adv_security_doc",
+        "source": "drive",
+        "title": "Security FAQ",
+        "text": "Drive notes explain OAuth scopes and credential storage.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_calendar_event_title_professor_001",
+    "category": "calendar_event_title",
+    "query": "Professor Hwang Office Hours",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_cal_hwang_office_hours"],
+    "expected_source": "calendar",
+    "source_filter": "calendar",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_cal_hwang_office_hours",
+        "source": "calendar",
+        "title": "Professor Hwang Office Hours",
+        "text": "Event: Professor Hwang Office Hours\nDescription: Discuss paper outline and retrieval evaluation results.",
+        "relevant": true
+      },
+      {
+        "id": "adv_drive_hwang_notes",
+        "source": "drive",
+        "title": "Professor Hwang Notes",
+        "text": "Research notes mention paper outline and retrieval evaluation results.",
+        "relevant": false
+      },
+      {
+        "id": "adv_cal_paper_review",
+        "source": "calendar",
+        "title": "Paper Review",
+        "text": "Event: Paper Review\nDescription: Discuss evaluation results and writing tasks.",
+        "relevant": false
+      }
+    ]
+  },
+  {
+    "id": "adv_weird_acronym_p0_001",
+    "category": "weird_acronym",
+    "query": "P0",
+    "expected_behavior": "answerable",
+    "expected_doc_ids": ["adv_p0_protocol"],
+    "expected_source": "drive",
+    "expected_hybrid_rank_max": 1,
+    "documents": [
+      {
+        "id": "adv_p0_protocol",
+        "source": "drive",
+        "title": "P0 Protocol",
+        "text": "Critical incident paging requires executive notification, incident commander assignment, and customer impact tracking.",
+        "relevant": true
+      },
+      {
+        "id": "adv_incident_paging",
+        "source": "drive",
+        "title": "Incident Paging",
+        "text": "Critical incidents require executive notification and customer impact tracking.",
+        "relevant": false
+      },
+      {
+        "id": "adv_customer_impact",
+        "source": "drive",
+        "title": "Customer Impact Tracking",
+        "text": "Support records customer impact and affected account counts during outages.",
+        "relevant": false
+      }
+    ]
+  }
+]

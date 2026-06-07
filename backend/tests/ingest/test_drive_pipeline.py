@@ -244,6 +244,33 @@ def test_process_drive_file_attaches_drive_metadata(db_session, fake_vector_env,
     assert meta["title"] == "Launch Plan"
     assert meta["doc_id"] == "doc-meta"
     assert meta["link"].endswith("/doc-meta/view")
+    assert sample_row.text.startswith("Title: Launch Plan\nSource: drive\nDocument ID: doc-meta\nMIME: application/pdf\n\n")
+    assert "launch content" in sample_row.text
+
+
+def test_build_drive_chunk_rows_prefixes_retrieval_metadata(test_user):
+    rows = drive_pipeline._build_chunk_rows(
+        user_id=test_user.id,
+        doc_id="doc-prefix",
+        text="Body text for retrieval.",
+        content_hash="hash-prefix",
+        doc_meta={
+            "title": "Launch Plan",
+            "source": "drive",
+            "doc_id": "doc-prefix",
+            "mime_type": "text/plain",
+        },
+    )
+
+    assert rows
+    first = rows[0]
+    assert first["id"] == f"{test_user.id}-doc-prefix-0"
+    assert first["text"].startswith("Title: Launch Plan\nSource: drive\nDocument ID: doc-prefix\nMIME: text/plain\n\n")
+    assert "Body text for retrieval." in first["text"]
+    assert first["meta"]["source"] == "drive"
+    assert first["meta"]["doc_id"] == "doc-prefix"
+    assert first["meta"]["title"] == "Launch Plan"
+    assert first["meta"]["content_hash"] == "hash-prefix"
 
 
 def test_embedding_batcher_batches_multiple_docs(db_session, fake_vector_env, test_user):

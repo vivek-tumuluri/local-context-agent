@@ -15,7 +15,7 @@ import { useIngestStatus } from "./hooks/useIngestStatus";
 
 const POLL_INTERVAL_MS = 3000;
 
-export default function Dashboard() {
+export default function Dashboard({ theme, onToggleTheme }) {
   const { user, csrfToken, refreshAuth, isDriveConnected, isCalendarConnected } = useAuth();
   const [driveJobId, setDriveJobId] = useState(null);
   const [driveJob, setDriveJob] = useState(null);
@@ -203,7 +203,7 @@ export default function Dashboard() {
         {
           query: prompt,
           k: 6,
-          max_ctx_chars: 4000,
+          max_ctx_chars: 8000,
           allow_partial: true,
         },
         csrfToken
@@ -334,6 +334,8 @@ export default function Dashboard() {
       initials={initials}
       actions={shellActions}
       pageTitle={pageTitles[activeSection] || "Azeryn"}
+      theme={theme}
+      onToggleTheme={onToggleTheme}
     >
       {activeSection === "ask" && (
         <AskView

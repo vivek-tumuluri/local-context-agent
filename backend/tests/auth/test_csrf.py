@@ -27,7 +27,7 @@ async def test_csrf_endpoint_refreshes_cookie(api_client):
 
 @pytest.mark.asyncio
 async def test_csrf_required_for_cookie_requests(api_client, monkeypatch):
-    monkeypatch.setattr(rag_routes, "vec_query", lambda *args, **kwargs: [])
+    monkeypatch.setattr(rag_routes, "hybrid_query", lambda *args, **kwargs: [])
 
     cookies = {auth.SESSION_COOKIE_NAME: "session-token"}
     resp = await api_client.post("/rag/search", json={"query": "hi", "k": 1}, cookies=cookies)
@@ -38,7 +38,7 @@ async def test_csrf_required_for_cookie_requests(api_client, monkeypatch):
 async def test_valid_csrf_header_allows_request(api_client, monkeypatch):
     token = "csrf-token"
 
-    def fake_query(query: str, k: int, user_id: str):
+    def fake_query(query: str, k: int, user_id: str, source=None):
         return [
             {
                 "text": "This is a long enough piece of content to pass filters in /rag/search.",
@@ -52,7 +52,7 @@ async def test_valid_csrf_header_allows_request(api_client, monkeypatch):
             },
         ]
 
-    monkeypatch.setattr(rag_routes, "vec_query", fake_query)
+    monkeypatch.setattr(rag_routes, "hybrid_query", fake_query)
     headers = {auth.CSRF_HEADER_NAME: token}
     cookies = {
         auth.SESSION_COOKIE_NAME: "session-token",

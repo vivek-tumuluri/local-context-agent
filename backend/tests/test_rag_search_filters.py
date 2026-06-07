@@ -7,7 +7,7 @@ from app.routes import rag_routes
 async def test_rag_search_filters_drop_tiny_and_trashed_hits(api_client, monkeypatch):
     token = "csrf-token"
 
-    def fake_query(query: str, k: int, user_id: str):
+    def fake_query(query: str, k: int, user_id: str, source=None):
         return [
             {
                 "text": "tiny",
@@ -26,7 +26,7 @@ async def test_rag_search_filters_drop_tiny_and_trashed_hits(api_client, monkeyp
             },
         ]
 
-    monkeypatch.setattr(rag_routes, "vec_query", fake_query)
+    monkeypatch.setattr(rag_routes, "hybrid_query", fake_query)
     from app.core import auth
 
     headers = {auth.CSRF_HEADER_NAME: token}
