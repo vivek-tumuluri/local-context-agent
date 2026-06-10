@@ -43,6 +43,36 @@ def test_query_filters_by_source(fake_vector_env):
     assert {hit["meta"]["doc_id"] for hit in hits} == {"source-calendar"}
 
 
+def test_upsert_sanitizes_nul_bytes_in_text_and_metadata(fake_vector_env):
+    chunks = [
+        {
+            "id": "nul-doc-0",
+            "text": "Alpha\x00Beta",
+            "meta": {
+                "doc_id": "nul-doc",
+                "source": "drive",
+                "title": "Bad\x00Title",
+                "bad\x00key": "bad-key-value",
+                "\x00": "empty-key-value",
+                "nested": {"owner": "A\x00B", "team\x00name": "QA"},
+            },
+        },
+    ]
+
+    summary = vector.upsert(chunks, user_id="nul-user")
+    assert summary["added"] == 1
+
+    hits = vector.query("Alpha Beta", k=1, user_id="nul-user")
+    assert hits
+    assert "\x00" not in hits[0]["text"]
+    assert "\x00" not in hits[0]["meta"]["title"]
+    assert "badkey" in hits[0]["meta"]
+    assert "\x00" not in "".join(hits[0]["meta"].keys())
+    assert "" not in hits[0]["meta"]
+    assert "\x00" not in hits[0]["meta"]["nested"]["owner"]
+    assert "teamname" in hits[0]["meta"]["nested"]
+
+
 def test_delete_paths(fake_vector_env):
     chunks = [
         {"id": "docA-0", "text": "Alpha text", "meta": {"doc_id": "docA"}},

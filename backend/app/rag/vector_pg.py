@@ -17,6 +17,7 @@ from app.core.db import SessionLocal
 from app.core.models import DocChunk
 from app.core.settings import settings
 from app.rag.embedding_config import EMBED_DIM, EMBED_MODEL
+from app.ingest.text_normalize import normalize_text
 
 log = logging.getLogger("vector_pg")
 BACKEND_NAME = "pgvector"
@@ -35,15 +36,37 @@ _client = OpenAI(api_key=settings.openai_api_key)
 _retry_after_re = re.compile(r"try again in (\d+)\s*ms", re.IGNORECASE)
 
 
+def _clean_db_text(value: Any) -> str:
+    return normalize_text(str(value or ""))[:MAX_CHARS_PER_CHUNK]
+
+
+def _clean_metadata(value: Any) -> Any:
+    if isinstance(value, str):
+        return normalize_text(value)
+    if isinstance(value, dict):
+        cleaned: Dict[str, Any] = {}
+        for k, v in value.items():
+            key = normalize_text(str(k))
+            if not key:
+                continue
+            cleaned[key] = _clean_metadata(v)
+        return cleaned
+    if isinstance(value, list):
+        return [_clean_metadata(v) for v in value]
+    if isinstance(value, tuple):
+        return [_clean_metadata(v) for v in value]
+    return value
+
+
 def _clean_texts(texts: Sequence[str]) -> List[str]:
     out: List[str] = []
     for text in texts:
         if not text:
             continue
-        t = text.strip()
+        t = _clean_db_text(text)
         if not t:
             continue
-        out.append(t[:MAX_CHARS_PER_CHUNK])
+        out.append(t)
     return out
 
 
@@ -191,15 +214,16 @@ class _PgCollection:
             )
             rows = []
             for idx, cid in enumerate(ids):
+                meta = _clean_metadata(metadatas[idx]) if idx < len(metadatas) else {}
                 rows.append(
                     DocChunk(
                         id=cid,
                         user_id=self.user_id,
-                        doc_id=metadatas[idx].get("doc_id") if idx < len(metadatas) else None,
-                        source=(metadatas[idx].get("source") if idx < len(metadatas) else None) or "drive",
-                        title=metadatas[idx].get("title") if idx < len(metadatas) else None,
-                        text=documents[idx] if idx < len(documents) else "",
-                        chunk_metadata=metadatas[idx] if idx < len(metadatas) else {},
+                        doc_id=meta.get("doc_id"),
+                        source=meta.get("source") or "drive",
+                        title=normalize_text(meta.get("title") or "") or None,
+                        text=_clean_db_text(documents[idx] if idx < len(documents) else ""),
+                        chunk_metadata=meta,
                         embedding=list(embeddings[idx]) if idx < len(embeddings) else [],
                     )
                 )
@@ -221,12 +245,11 @@ def _prepare_batch(batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     prepared: List[Dict[str, Any]] = []
     for chunk in batch:
         cid = chunk.get("id")
-        meta = chunk.get("meta") or {}
+        meta = _clean_metadata(chunk.get("meta") or {})
         doc_id = meta.get("doc_id")
-        txt = (chunk.get("text") or "").strip()
+        txt = _clean_db_text(chunk.get("text") or "")
         if not cid or not doc_id or not txt:
             continue
-        txt = txt[:MAX_CHARS_PER_CHUNK]
         prepared.append(
             {
                 "id": cid,
@@ -267,7 +290,7 @@ def upsert(chunks: List[Dict[str, Any]], user_id: str) -> Dict[str, Any]:
                     source=(meta.get("source") or meta.get("src") or "drive"),
                     title=meta.get("title") or meta.get("name"),
                     text=item["text"],
-                    chunk_metadata=dict(meta),
+                    chunk_metadata=_clean_metadata(meta),
                     embedding=list(vecs[idx]),
                 )
             )

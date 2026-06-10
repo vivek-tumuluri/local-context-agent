@@ -8,11 +8,13 @@ _WHITESPACE_RUN = re.compile(r"[ \t]+")
 _BLANK_LINES = re.compile(r"\n{3,}")
 _TRAILING_WS = re.compile(r"[ \t]+\n")
 _ZERO_WIDTH = re.compile(r"[\u200B-\u200D\uFEFF]")
+_DB_UNSAFE_CONTROL = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
 
 def normalize_text(txt: Optional[str]) -> str:
     if not txt:
         return ""
     txt = unicodedata.normalize("NFC", txt)
+    txt = _DB_UNSAFE_CONTROL.sub("", txt)
     txt = _CRLF.sub("\n", txt)
     txt = txt.replace("\u00A0", " ")
     txt = _ZERO_WIDTH.sub("", txt)

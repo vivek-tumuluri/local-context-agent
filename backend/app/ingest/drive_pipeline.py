@@ -69,14 +69,20 @@ class EmbeddingBatcher:
             raise RuntimeError(f"Embedding returned no chunks for document {work.doc_id}; aborting update.")
         if work.doc_id in self._doc_states:
             raise RuntimeError(f"Duplicate doc_id registered in batcher: {work.doc_id}")
-        self._doc_states[work.doc_id] = {"work": work, "inserted": 0}
-        work.embedded_count = len(work.chunks)
-        ready: List[DocWork] = []
+        normalized_chunks: List[Dict[str, Any]] = []
         for chunk in work.chunks:
-            text = (chunk.get("text") or "").strip()
+            text = normalize_text(chunk.get("text") or "")
             if not text:
                 continue
             chunk["text"] = text[: vector.MAX_CHARS_PER_CHUNK]
+            normalized_chunks.append(chunk)
+        if not normalized_chunks:
+            raise RuntimeError(f"Embedding returned no usable chunks for document {work.doc_id}; aborting update.")
+        work.chunks = normalized_chunks
+        work.embedded_count = len(work.chunks)
+        self._doc_states[work.doc_id] = {"work": work, "inserted": 0}
+        ready: List[DocWork] = []
+        for chunk in work.chunks:
             self._pending.append((work, chunk))
             self._pending_tokens += self._estimate_tokens(chunk["text"])
             ready.extend(self._maybe_flush())

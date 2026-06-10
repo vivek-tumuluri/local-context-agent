@@ -84,6 +84,12 @@ def _run_ingest(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             return {}
 
         job_helper.mark_job_running(db, job_id, total_files=0)
+        if int(attempt_ctx.get("attempt") or 1) > 1:
+            job_row = db.get(IngestionJob, job_id)
+            if job_row:
+                job_row.processed_files = 0
+                job_row.updated_at = utcnow()
+                db.commit()
 
         last_reported = 0
         latest_done = 0
@@ -122,6 +128,15 @@ def _run_ingest(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         flush_progress(force=True)
         errors = int(result.get("errors") or 0)
         token_budget_hit = bool(result.get("token_budget_hit"))
+
+        final_processed = result.get("found", result.get("processed"))
+        if final_processed is not None:
+            job_row = db.get(IngestionJob, job_id)
+            if job_row:
+                job_row.processed_files = max(0, int(final_processed or 0))
+                job_row.total_files = max(int(job_row.total_files or 0), int(final_processed or 0))
+                job_row.updated_at = utcnow()
+
         if errors:
             summary = f"Ingest completed with {errors} error(s)."
             job_helper.finish_job(db, job_id, status="failed", error_summary=summary, metrics=result)
@@ -178,6 +193,7 @@ def _run_ingest(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             pass
         summary = _format_error(exc)
         duration_ms = round((time.perf_counter() - timing_start) * 1000, 3)
+        db.rollback()
         if _is_transient_error(exc):
             job_helper.record_job_error(db, job_id, f"Transient error: {summary}")
             log_event(

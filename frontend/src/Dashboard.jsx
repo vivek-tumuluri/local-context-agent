@@ -14,6 +14,7 @@ import { TERMINAL_STATUSES } from "./dashboardUtils";
 import { useIngestStatus } from "./hooks/useIngestStatus";
 
 const POLL_INTERVAL_MS = 3000;
+const DEFAULT_DRIVE_INGEST_LIMIT = 800;
 
 export default function Dashboard({ theme, onToggleTheme }) {
   const { user, csrfToken, refreshAuth, isDriveConnected, isCalendarConnected } = useAuth();
@@ -145,7 +146,7 @@ export default function Dashboard({ theme, onToggleTheme }) {
         "/ingest/drive/start",
         {
           query: "",
-          max_files: 650,
+          max_files: DEFAULT_DRIVE_INGEST_LIMIT,
           reembed_all: false,
         },
         csrfToken

@@ -37,6 +37,21 @@ def main() -> None:
             try:
                 super().execute_job(job, queue)
                 duration_ms = round((time.perf_counter() - start) * 1000, 3)
+                try:
+                    rq_status = job.get_status(refresh=True)
+                except Exception:
+                    rq_status = None
+                if rq_status and str(rq_status).lower() == "failed":
+                    log_event(
+                        "worker_job_failed",
+                        rq_job_id=job.id,
+                        queue=queue.name,
+                        duration_ms=duration_ms,
+                        error="RQ job finished with failed status.",
+                        retries_left=getattr(job, "retries_left", None),
+                        level="error",
+                    )
+                    return
                 log_event(
                     "worker_job_completed",
                     rq_job_id=job.id,

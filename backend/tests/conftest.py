@@ -12,6 +12,7 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
+from tests.db_safety import configure_test_database
 
 # Configure deterministic env before app modules import.
 os.environ.setdefault("ENVIRONMENT", "local")
@@ -19,7 +20,8 @@ os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("SESSION_COOKIE_SECURE", "1")
 os.environ.setdefault("SESSION_COOKIE_SAMESITE", "strict")
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-value-that-is-long-enough-12345")
-os.environ.setdefault("DATABASE_URL", "sqlite:///./local_context.db")
+
+configure_test_database(os.environ)
 if "DRIVE_CREDENTIALS_KEY" not in os.environ:
     os.environ["DRIVE_CREDENTIALS_KEY"] = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")

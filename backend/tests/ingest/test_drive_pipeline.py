@@ -101,6 +101,52 @@ def test_process_drive_file_replaces_stale_chunks(db_session, fake_vector_env, t
     assert len(chunk_ids) == summary["embedded"]
 
 
+def test_process_drive_file_sanitizes_control_chars_before_embedding(db_session, fake_vector_env, test_user):
+    summary = drive_pipeline.process_drive_file(
+        db_session,
+        user_id=test_user.id,
+        file_meta=_make_file("doc-nul", version="1", modifiedTime=None),
+        fetch_file_bytes=lambda **_: b"ignored",
+        parse_bytes=lambda data, mime: "Alpha\x00Beta\x07",
+    )
+    summary = _ingest_single_doc(db_session, test_user.id, summary)
+
+    assert summary["embedded"] > 0
+    chunk = db_session.query(DocChunk).filter(DocChunk.doc_id == "doc-nul").one()
+    assert "AlphaBeta" in chunk.text
+    assert "\x00" not in chunk.text
+    assert "\x07" not in chunk.text
+    assert "\x00" not in fake_vector_env.calls[0]["input"][0]
+    assert "\x07" not in fake_vector_env.calls[0]["input"][0]
+
+
+def test_embedding_batcher_does_not_register_doc_when_chunks_normalize_empty(test_user):
+    batcher = drive_pipeline.EmbeddingBatcher(test_user.id)
+    work = drive_pipeline.DocWork(
+        doc_id="empty-doc",
+        user_id=test_user.id,
+        chunks=[{"id": "empty-doc-0", "text": "\x00\x07", "meta": {"doc_id": "empty-doc"}}],
+        existing_chunk_ids=[],
+        file_meta={"id": "empty-doc", "name": "empty-doc"},
+        content_hash="hash",
+        embedded_count=0,
+    )
+
+    with pytest.raises(RuntimeError, match="no usable chunks"):
+        batcher.enqueue_doc(work)
+
+    replacement = drive_pipeline.DocWork(
+        doc_id="empty-doc",
+        user_id=test_user.id,
+        chunks=[{"id": "empty-doc-1", "text": "usable text", "meta": {"doc_id": "empty-doc"}}],
+        existing_chunk_ids=[],
+        file_meta={"id": "empty-doc", "name": "empty-doc"},
+        content_hash="hash-2",
+        embedded_count=0,
+    )
+    batcher.enqueue_doc(replacement)
+
+
 def test_process_drive_file_does_not_delete_on_embedding_failure(monkeypatch, db_session, fake_vector_env, test_user):
     first = "initial body"
     content_hash = compute_content_hash(first)
